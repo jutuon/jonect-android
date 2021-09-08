@@ -7,28 +7,88 @@ package com.example.jonect
 import java.io.ByteArrayOutputStream
 import java.io.DataInputStream
 import java.net.Socket
+import java.nio.ByteBuffer
+import java.nio.channels.Pipe
+import java.nio.channels.spi.SelectorProvider
+import java.util.concurrent.ArrayBlockingQueue
+import java.util.concurrent.BlockingQueue
 import kotlin.math.min
 
+interface IConnectionMessage
+
+class ConnectionQuitRequestEvent: IConnectionMessage
+
 class ConnectionThread: Thread {
+    private val handle: LogicMessageHandle
+    private val address: String
 
-    constructor(): super() {
+    private val connectionMessages: BlockingQueue<IConnectionMessage> =
+        ArrayBlockingQueue(32)
+    private var pipe: Pipe
+    private var sendRequestQuit: Pipe.SinkChannel
 
+    constructor(handle: LogicMessageHandle, address: String): super() {
+        this.handle = handle
+        this.address = address
+
+        this.pipe = SelectorProvider.provider().openPipe()
+        this.sendRequestQuit = this.pipe.sink()
     }
 
     override fun run() {
-
-
-
+        val connection = Connection(
+            this.handle,
+            this.address,
+            this.connectionMessages,
+            this.pipe.source(),
+        )
+        connection.start()
     }
 
+    fun sendQuitRequest() {
+        this.connectionMessages.put(ConnectionQuitRequestEvent())
+
+        val data = ByteBuffer.allocate(1)
+        this.sendRequestQuit.write(data)
+    }
 }
 
 
 
-class Connection {
+class Connection(
+    private val handle: LogicMessageHandle,
+    private val address: String,
+    private val messages: BlockingQueue<IConnectionMessage>,
+    private val messageNotifications: Pipe.SourceChannel,
+) {
 
-    fun connect(address: String) {
-        var socket = Socket(address, 8080)
+    fun start() {
+        println("Connection: start")
+        handle.sendConnectedNotification()
+
+        val buffer = ByteBuffer.allocate(1)
+        while (true) {
+            buffer.clear()
+            val result = messageNotifications.read(buffer)
+            if (result == -1) {
+                // EOF
+                return
+            } else if (result == 0) {
+                continue
+            }
+
+            val message = messages.take()
+            when (message) {
+                is ConnectionQuitRequestEvent -> {
+                    println("Connection: quit")
+                    break
+                }
+            }
+        }
+    }
+
+    fun connect() {
+        var socket = Socket(this.address, 8080)
 
         var input = socket.getInputStream()
 

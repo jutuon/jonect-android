@@ -7,7 +7,9 @@ package com.example.jonect
 import android.app.Service
 import android.content.Intent
 import android.os.Binder
+import android.os.Handler
 import android.os.IBinder
+import android.os.Looper
 
 
 class LogicServiceBinder(var logicService: LogicService): Binder() {
@@ -19,7 +21,7 @@ class LogicServiceBinder(var logicService: LogicService): Binder() {
 class LogicService: Service() {
     private val serviceBinder = LogicServiceBinder(this)
 
-    private val logicThread = LogicThread()
+    private val logicThread = LogicThread(ServiceHandle(this))
     private var status = ""
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -50,4 +52,19 @@ class LogicService: Service() {
         this.status = address
     }
 
+    fun setStatus(status: String) {
+        this.status = status
+    }
+
+    fun setStatusUpdateCallback() {
+        // TODO
+    }
+}
+
+class ServiceHandle(private val service: LogicService) {
+    fun updateStatus(status: String) {
+        Handler(Looper.getMainLooper()).post {
+            this.service.setStatus(status)
+        }
+    }
 }
