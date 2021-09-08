@@ -4,42 +4,43 @@
 
 package com.example.jonect
 
+import android.content.ComponentName
+import android.content.Intent
+import android.content.ServiceConnection
 import androidx.appcompat.app.AppCompatActivity
 import android.os.Bundle
+import android.os.IBinder
 import android.widget.Button
 import android.widget.EditText
 import android.widget.TextView
 
-// TODO: Current implementation will not work if multiple
-//       activities are started. Use a service to store logic thread.
-
-// UiState will be empty after app process is killed.
-object UiState {
-    var initDone = false
-    lateinit var address: String
-    lateinit var status: String
-    lateinit var logicThread: LogicThread;
-
-    fun init() {
-        this.initDone = true
-        this.address = "10.0.2.2"
-        this.status = ""
-        this.logicThread = LogicThread();
-        this.logicThread.start()
-        println("Logic start")
+class ServiceConnectionHandler(private val activity: MainActivity): ServiceConnection {
+    override fun onServiceConnected(p0: ComponentName?, serviceBinder: IBinder?) {
+        this.activity.service = (serviceBinder as LogicServiceBinder).getService()
+        this.activity.handleServiceConnect()
+        println("Activity: service connected")
     }
 
-    fun quit() {
-        UiState.logicThread.sendQuitRequest()
-        UiState.logicThread.join()
-        UiState.initDone = false
-        println("Logic quit ready")
+    override fun onServiceDisconnected(p0: ComponentName?) {
+        // This should only happen when this.activity.unbindService() is called
+        // and this.activity.onDestroy() is running.
+
+        // If check is just limited to this.activity.isFinishing
+        // because it is not clear when this method runs after unbindService() is called.
+        if (!this.activity.quitStarted) {
+            throw Exception("Activity: Service disconnected")
+        }
     }
 }
 
 class MainActivity : AppCompatActivity() {
     private lateinit var address: EditText
     private lateinit var status: TextView
+
+    var service: LogicService? = null
+    var quitStarted = false
+
+    private val serviceConnectionHandler = ServiceConnectionHandler(this)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -53,30 +54,61 @@ class MainActivity : AppCompatActivity() {
         this.address = this.findViewById(R.id.edit_text_server_address)
         this.status = this.findViewById(R.id.text_view_status)
 
-        if (!UiState.initDone) {
-            UiState.init()
+        // Update status text before binding service to
+        // avoid setting previous text after UI is drawn before
+        // service is connected. Method this.handleServiceConnect()
+        // will also update the text.
+        savedInstanceState?.also { bundle ->
+            bundle.getString(STATE_TEXT)?.also {
+                this.status.text = it
+            }
         }
 
-        this.address.text.clear()
-        this.address.text.append(UiState.address)
-        this.status.text = UiState.status
+        val intent = Intent(this, LogicService::class.java)
+        this.startService(intent)
+        val status = this.bindService(intent, serviceConnectionHandler, BIND_AUTO_CREATE)
+
+        if (!status) {
+            throw Exception("Activity: bindService() failed")
+        }
+
+    }
+
+    fun handleServiceConnect() {
+        this.service?.also {
+            this.status.text = it.getStatus()
+        }
     }
 
     private fun handleConnectButtonOnClick() {
         val address = this.address.text.toString()
         this.status.text = address
-        UiState.logicThread.sendConnectMessage(address)
+        this.service?.also {
+            it.sendConnectMessage(address)
+        }
     }
 
     override fun onDestroy() {
         super.onDestroy()
 
-        // Store activity UI data for activity recreation.
-        UiState.address = this.address.text.toString()
-        UiState.status = this.status.text.toString()
-
         if (this.isFinishing) {
-            UiState.quit()
+            this.quitStarted = true
+            val intent = Intent(this, LogicService::class.java)
+            this.service?.also {
+                this.unbindService(this.serviceConnectionHandler)
+            }
+            this.stopService(intent)
         }
     }
+
+    override fun onSaveInstanceState(outState: Bundle) {
+        outState.putString(STATE_TEXT, this.status.text.toString())
+
+        super.onSaveInstanceState(outState)
+    }
+
+    companion object {
+        const val STATE_TEXT = "status"
+    }
+
 }
