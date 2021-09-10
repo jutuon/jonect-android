@@ -71,13 +71,19 @@ class MainActivity : AppCompatActivity() {
         if (!status) {
             throw Exception("Activity: bindService() failed")
         }
-
     }
 
     fun handleServiceConnect() {
         this.service?.also {
             this.status.text = it.getStatus()
+            it.setCurrentConnectedActivity(this)
         }
+    }
+
+    fun serviceStatusUpdate(newStatus: String) {
+        this.status.text = newStatus
+        print("Status update: ")
+        println(status)
     }
 
     private fun handleConnectButtonOnClick() {
@@ -95,6 +101,7 @@ class MainActivity : AppCompatActivity() {
             this.quitStarted = true
             val intent = Intent(this, LogicService::class.java)
             this.service?.also {
+                it.disconnectActivity(this)
                 this.unbindService(this.serviceConnectionHandler)
             }
             this.stopService(intent)

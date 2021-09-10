@@ -23,6 +23,7 @@ class LogicService: Service() {
 
     private val logicThread = LogicThread(ServiceHandle(this))
     private var status = ""
+    private var currentConnectedActivity: MainActivity? = null
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         return START_NOT_STICKY
@@ -49,15 +50,31 @@ class LogicService: Service() {
 
     fun sendConnectMessage(address: String)  {
         this.logicThread.sendConnectMessage(address)
-        this.status = address
     }
 
     fun setStatus(status: String) {
         this.status = status
+        this.currentConnectedActivity?.also {
+            it.serviceStatusUpdate(status)
+        }
     }
 
-    fun setStatusUpdateCallback() {
-        // TODO
+    /**
+     * Sets current connected activity. Connected activity will get
+     * service status updates.
+     */
+    fun setCurrentConnectedActivity(activity: MainActivity) {
+        this.currentConnectedActivity = activity
+    }
+
+    /**
+     * Disconnects current connected activity if argument activity is
+     * the current connected activity.
+     */
+    fun disconnectActivity(activity: MainActivity) {
+        if (this.currentConnectedActivity == activity) {
+            this.currentConnectedActivity = null
+        }
     }
 }
 
