@@ -36,6 +36,7 @@ class ServiceConnectionHandler(private val activity: MainActivity): ServiceConne
 class MainActivity : AppCompatActivity() {
     private lateinit var address: EditText
     private lateinit var status: TextView
+    private lateinit var connectButton: Button
 
     var service: LogicService? = null
     var quitStarted = false
@@ -46,8 +47,8 @@ class MainActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
 
-        val button = this.findViewById<Button>(R.id.button_connect)
-        button.setOnClickListener {
+        this.connectButton = this.findViewById<Button>(R.id.button_connect)
+        this.connectButton.setOnClickListener {
             this.handleConnectButtonOnClick()
         }
 
@@ -76,21 +77,39 @@ class MainActivity : AppCompatActivity() {
     fun handleServiceConnect() {
         this.service?.also {
             this.status.text = it.getStatus()
+            this.serviceServerConnectedUpdate(it.getServerConnected())
             it.setCurrentConnectedActivity(this)
+        }
+    }
+
+    fun serviceServerConnectedUpdate(serverConnected: Boolean) {
+        if (serverConnected) {
+            this.connectButton.text = "Disconnect"
+            this.address.isEnabled = false
+        } else {
+            this.connectButton.text = "Connect"
+            this.address.isEnabled = true
         }
     }
 
     fun serviceStatusUpdate(newStatus: String) {
         this.status.text = newStatus
         print("Status update: ")
-        println(status)
+        println(newStatus)
     }
 
     private fun handleConnectButtonOnClick() {
-        val address = this.address.text.toString()
-        this.status.text = address
         this.service?.also {
-            it.sendConnectMessage(address)
+            if (it.getServerConnectDisconnectRunning()) {
+                return
+            }
+
+            if (it.getServerConnected()) {
+                it.sendDisconnectMessage()
+            } else {
+                val address = this.address.text.toString()
+                it.sendConnectMessage(address)
+            }
         }
     }
 

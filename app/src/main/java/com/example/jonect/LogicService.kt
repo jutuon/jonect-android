@@ -24,6 +24,8 @@ class LogicService: Service() {
     private val logicThread = LogicThread(ServiceHandle(this))
     private var status = ""
     private var currentConnectedActivity: MainActivity? = null
+    private var serverConnected = false
+    private var serverConnectDisconnectRunning = false
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         return START_NOT_STICKY
@@ -48,12 +50,50 @@ class LogicService: Service() {
         return this.status
     }
 
-    fun sendConnectMessage(address: String)  {
-        this.logicThread.sendConnectMessage(address)
+    fun getServerConnected(): Boolean {
+        return this.serverConnected
     }
 
-    fun setStatus(status: String) {
-        this.status = status
+    fun getServerConnectDisconnectRunning(): Boolean {
+        return this.serverConnectDisconnectRunning
+    }
+
+    fun sendConnectMessage(address: String)  {
+        this.logicThread.sendConnectMessage(address)
+        this.serverConnectDisconnectRunning = true
+    }
+
+    fun sendDisconnectMessage() {
+        this.logicThread.sendDisconnectMessage()
+        this.serverConnectDisconnectRunning = true
+    }
+
+    fun setStatus(statusEvent: ILogicStatusEvent) {
+        when (statusEvent) {
+            is ConnectedEvent -> {
+                this.serverConnected = true
+                this.serverConnectDisconnectRunning = false
+                this.currentConnectedActivity?.also {
+                    it.serviceServerConnectedUpdate(this.serverConnected)
+                }
+            }
+            is ConnectionError -> {
+                this.serverConnected = false
+                this.serverConnectDisconnectRunning = false
+                this.currentConnectedActivity?.also {
+                    it.serviceServerConnectedUpdate(this.serverConnected)
+                }
+            }
+            is DisconnectedEvent -> {
+                this.serverConnected = false
+                this.serverConnectDisconnectRunning = false
+                this.currentConnectedActivity?.also {
+                    it.serviceServerConnectedUpdate(this.serverConnected)
+                }
+            }
+        }
+
+        this.status = statusEvent.toString()
         this.currentConnectedActivity?.also {
             it.serviceStatusUpdate(status)
         }
@@ -79,9 +119,9 @@ class LogicService: Service() {
 }
 
 class ServiceHandle(private val service: LogicService) {
-    fun updateStatus(status: String) {
+    fun updateStatus(statusEvent: ILogicStatusEvent) {
         Handler(Looper.getMainLooper()).post {
-            this.service.setStatus(status)
+            this.service.setStatus(statusEvent)
         }
     }
 }

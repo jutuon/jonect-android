@@ -10,9 +10,24 @@ import android.os.Message
 
 data class ConnectEvent(val address: String)
 class QuitRequestEvent
-class ConnectedEvent
-class ConnectionError
+class DisconnectEvent
+class ConnectedEvent: ILogicStatusEvent {
+    override fun toString(): String {
+        return "Connected"
+    }
+}
+class DisconnectedEvent: ILogicStatusEvent {
+    override fun toString(): String {
+        return "Disconnected"
+    }
+}
+class ConnectionError: ILogicStatusEvent {
+    override fun toString(): String {
+        return "Connection error"
+    }
+}
 
+interface ILogicStatusEvent
 
 class LogicThread: Thread {
     private val serviceHandle: ServiceHandle
@@ -39,16 +54,22 @@ class LogicThread: Thread {
         Looper.loop()
     }
 
-    fun sendConnectMessage(address: String) {
+    private fun sendMessage(messageData: Any) {
         var message = this.messageHandler.obtainMessage()
-        message.obj = ConnectEvent(address)
+        message.obj = messageData
         this.messageHandler.sendMessage(message)
     }
 
+    fun sendConnectMessage(address: String) {
+        this.sendMessage(ConnectEvent(address))
+    }
+
     fun sendQuitRequest() {
-        var message = this.messageHandler.obtainMessage()
-        message.obj = QuitRequestEvent()
-        this.messageHandler.sendMessage(message)
+        this.sendMessage(QuitRequestEvent())
+    }
+
+    fun sendDisconnectMessage() {
+        this.sendMessage(DisconnectEvent())
     }
 }
 
@@ -88,11 +109,20 @@ class Logic(val serviceHandle: ServiceHandle) {
 
                 this.connection = connection
             }
+            is DisconnectEvent -> {
+                this.connection?.also {
+                    it.sendQuitRequest()
+                    it.join()
+
+                    this.connection = null
+                    this.updateServiceStatus(DisconnectedEvent())
+                }
+            }
             is ConnectedEvent -> {
-                this.updateServiceStatus("Connected")
+                this.updateServiceStatus(event)
             }
             is ConnectionError -> {
-                this.updateServiceStatus("Connection error")
+                this.updateServiceStatus(event)
                 this.connection?.run {
                     sendQuitRequest()
                     join()
@@ -114,8 +144,8 @@ class Logic(val serviceHandle: ServiceHandle) {
         return false
     }
 
-    fun updateServiceStatus(status: String) {
-        this.serviceHandle.updateStatus(status)
+    fun updateServiceStatus(statusEvent: ILogicStatusEvent) {
+        this.serviceHandle.updateStatus(statusEvent)
     }
 
 }
