@@ -111,9 +111,7 @@ class Logic(val serviceHandle: ServiceHandle) {
             }
             is DisconnectEvent -> {
                 this.connection?.also {
-                    it.sendQuitRequest()
-                    it.join()
-
+                    it.runQuit()
                     this.connection = null
                     this.updateServiceStatus(DisconnectedEvent())
                 }
@@ -122,16 +120,15 @@ class Logic(val serviceHandle: ServiceHandle) {
                 this.updateServiceStatus(event)
             }
             is ConnectionError -> {
-                this.updateServiceStatus(event)
-                this.connection?.run {
-                    sendQuitRequest()
-                    join()
+                this.connection?.also {
+                    it.runQuit()
+                    this.connection = null
+                    this.updateServiceStatus(ConnectionError())
                 }
             }
             is QuitRequestEvent -> {
                 this.connection?.run {
-                    sendQuitRequest()
-                    join()
+                    runQuit()
                 }
 
                 // Quit message loop.

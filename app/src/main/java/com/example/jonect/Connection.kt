@@ -43,14 +43,23 @@ class ConnectionThread: Thread {
             this.pipe.source(),
         )
         connection.start()
+        connection.closeSystemResources()
     }
 
-    fun sendQuitRequest() {
+    private fun sendQuitRequest() {
         this.connectionMessages.put(ConnectionQuitRequestEvent())
 
         val data = ByteBuffer.allocate(1)
         this.sendRequestQuit.write(data)
     }
+
+    fun runQuit() {
+        this.sendQuitRequest()
+        this.join()
+        this.sendRequestQuit.close()
+    }
+
+
 }
 
 
@@ -85,6 +94,10 @@ class Connection(
                 }
             }
         }
+    }
+
+    fun closeSystemResources() {
+        this.messageNotifications.close()
     }
 
     fun connect() {
