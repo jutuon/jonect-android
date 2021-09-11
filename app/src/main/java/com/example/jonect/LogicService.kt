@@ -19,21 +19,29 @@ class LogicServiceBinder(var logicService: LogicService): Binder() {
 }
 
 class LogicService: Service() {
-    private val serviceBinder = LogicServiceBinder(this)
+    private lateinit var serviceBinder: LogicServiceBinder
+    private lateinit var logicThread: LogicThread
 
-    private val logicThread = LogicThread(ServiceHandle(this))
-    private var status = ""
+    private lateinit var status: String
     private var currentConnectedActivity: MainActivity? = null
     private var serverConnected = false
     private var serverConnectDisconnectRunning = false
 
-    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        return START_NOT_STICKY
+    override fun onCreate() {
+        this.serviceBinder = LogicServiceBinder(this)
+        this.logicThread = LogicThread(ServiceHandle(this))
+
+        this.status = ""
+        this.currentConnectedActivity = null
+        this.serverConnected = false
+        this.serverConnectDisconnectRunning = false
+
+        this.logicThread.start()
+        println("Service: created")
     }
 
-    override fun onCreate() {
-        logicThread.start()
-        println("Service: created")
+    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        return START_NOT_STICKY
     }
 
     override fun onBind(p0: Intent?): IBinder? {
