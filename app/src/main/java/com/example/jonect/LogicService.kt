@@ -120,7 +120,7 @@ class LogicService: Service() {
      * the current connected activity.
      */
     fun disconnectActivity(activity: MainActivity) {
-        if (this.currentConnectedActivity == activity) {
+        if (this.currentConnectedActivity === activity) {
             this.currentConnectedActivity = null
         }
     }
