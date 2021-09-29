@@ -79,6 +79,9 @@ class MainActivity : AppCompatActivity() {
             this.status.text = it.getStatus()
             this.serviceServerConnectedUpdate(it.getServerConnected())
             it.setCurrentConnectedActivity(this)
+
+            // Connect to server automatically.
+            this.handleConnectButtonOnClick()
         }
     }
 
@@ -94,8 +97,7 @@ class MainActivity : AppCompatActivity() {
 
     fun serviceStatusUpdate(newStatus: String) {
         this.status.text = newStatus
-        print("Status update: ")
-        println(newStatus)
+        println("Status update: $newStatus")
     }
 
     private fun handleConnectButtonOnClick() {

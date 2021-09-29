@@ -26,6 +26,11 @@ class ConnectionError: ILogicStatusEvent {
         return "Connection error"
     }
 }
+class ConnectionMessage(val message: ProtocolMessage): ILogicStatusEvent {
+    override fun toString(): String {
+        return "Connection message: $message"
+    }
+}
 
 interface ILogicStatusEvent
 
@@ -74,10 +79,22 @@ class LogicThread: Thread {
 }
 
 class LogicMessageHandle(private val messageHandler: Handler) {
-    fun sendConnectedNotification() {
+    private fun sendMessage(messageData: Any) {
         var message = this.messageHandler.obtainMessage()
-        message.obj = ConnectedEvent()
+        message.obj = messageData
         this.messageHandler.sendMessage(message)
+    }
+
+    fun sendConnectedNotification() {
+        this.sendMessage(ConnectedEvent())
+    }
+
+    fun sendConnectionError() {
+        this.sendMessage(ConnectionError())
+    }
+
+    fun sendConnectionMessage(message: ProtocolMessage) {
+        this.sendMessage(ConnectionMessage(message))
     }
 }
 
@@ -118,6 +135,7 @@ class Logic(val serviceHandle: ServiceHandle) {
             }
             is ConnectedEvent -> {
                 this.updateServiceStatus(event)
+                this.connection?.sendProtocolMessage(ClientInfo("0.1", "Test client"))
             }
             is ConnectionError -> {
                 this.connection?.also {
@@ -125,6 +143,9 @@ class Logic(val serviceHandle: ServiceHandle) {
                     this.connection = null
                     this.updateServiceStatus(ConnectionError())
                 }
+            }
+            is ConnectionMessage -> {
+                this.handleProtocolMessage(event.message)
             }
             is QuitRequestEvent -> {
                 this.connection?.run {
@@ -139,6 +160,25 @@ class Logic(val serviceHandle: ServiceHandle) {
 
         // Continue message handling.
         return false
+    }
+
+    private fun handleProtocolMessage(message: ProtocolMessage) {
+        when (message) {
+            is ServerInfo -> {
+                println("Connected to $message")
+            }
+            is Ping -> {
+                println("Ping received")
+                this.connection?.sendProtocolMessage(PingResponse)
+            }
+            is PlayAudioStream -> {
+                // TODO
+                println("Audio stream play request received. Message: $message")
+            }
+            else -> {
+                println("Unsupported message $message received.")
+            }
+        }
     }
 
     fun updateServiceStatus(statusEvent: ILogicStatusEvent) {

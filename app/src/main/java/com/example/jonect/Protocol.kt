@@ -4,12 +4,39 @@
 
 package com.example.jonect
 
+import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 
 @Serializable
-data class ServerInfo(val version: String, val id: String)
+sealed class ProtocolMessage
 
 @Serializable
-sealed class ServerMessage {
-    data class ServerInfo(val serverInfo: ServerInfo)
-}
+@SerialName("ServerInfo")
+data class ServerInfo(
+        val version: String,
+        val id: String,
+        ): ProtocolMessage()
+
+@Serializable
+@SerialName("Ping")
+object Ping: ProtocolMessage()
+
+@Serializable
+@SerialName("PingResponse")
+object PingResponse: ProtocolMessage()
+
+@Serializable
+@SerialName("PlayAudioStream")
+data class PlayAudioStream(
+        val format: String,
+        val channels: Short,
+        val rate: Int,
+        val port: Int,
+): ProtocolMessage()
+
+@Serializable
+@SerialName("ClientInfo")
+data class ClientInfo(
+        val version: String,
+        val id: String,
+): ProtocolMessage()

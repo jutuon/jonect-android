@@ -4,35 +4,45 @@
 
 package com.example.jonect
 
-import java.io.ByteArrayOutputStream
-import java.io.DataInputStream
-import java.net.Socket
+import kotlinx.serialization.SerializationException
+import kotlinx.serialization.decodeFromString
+import kotlinx.serialization.encodeToString
+import kotlinx.serialization.json.Json
+import java.lang.Exception
+import java.net.ConnectException
+import java.net.InetSocketAddress
 import java.nio.ByteBuffer
 import java.nio.channels.Pipe
+import java.nio.channels.SelectionKey
+import java.nio.channels.Selector
+import java.nio.channels.SocketChannel
 import java.nio.channels.spi.SelectorProvider
 import java.util.concurrent.ArrayBlockingQueue
 import java.util.concurrent.BlockingQueue
-import kotlin.math.min
-
-interface IConnectionMessage
-
-class ConnectionQuitRequestEvent: IConnectionMessage
 
 class ConnectionThread: Thread {
     private val handle: LogicMessageHandle
     private val address: String
 
-    private val connectionMessages: BlockingQueue<IConnectionMessage> =
+    private val connectionMessages: BlockingQueue<ProtocolMessage> =
         ArrayBlockingQueue(32)
-    private var pipe: Pipe
-    private var sendRequestQuit: Pipe.SinkChannel
+    private var messageNotificationPipe: Pipe
+    private var messageNotificationSink: Pipe.SinkChannel
+
+    private var requestQuitPipe: Pipe
+    private var requestQuitSink: Pipe.SinkChannel
+
+    private val notificationByte = ByteBuffer.allocate(1)
 
     constructor(handle: LogicMessageHandle, address: String): super() {
         this.handle = handle
         this.address = address
 
-        this.pipe = SelectorProvider.provider().openPipe()
-        this.sendRequestQuit = this.pipe.sink()
+        this.requestQuitPipe = SelectorProvider.provider().openPipe()
+        this.requestQuitSink = this.requestQuitPipe.sink()
+
+        this.messageNotificationPipe = SelectorProvider.provider().openPipe()
+        this.messageNotificationSink = this.messageNotificationPipe.sink()
     }
 
     override fun run() {
@@ -40,100 +50,253 @@ class ConnectionThread: Thread {
             this.handle,
             this.address,
             this.connectionMessages,
-            this.pipe.source(),
+            this.messageNotificationPipe.source(),
+            this.requestQuitPipe.source(),
         )
         connection.start()
         connection.closeSystemResources()
     }
 
     private fun sendQuitRequest() {
-        this.connectionMessages.put(ConnectionQuitRequestEvent())
-
-        val data = ByteBuffer.allocate(1)
-        this.sendRequestQuit.write(data)
+        this.notificationByte.clear()
+        this.requestQuitSink.write(this.notificationByte)
     }
 
     fun runQuit() {
         this.sendQuitRequest()
         this.join()
-        this.sendRequestQuit.close()
+        this.requestQuitSink.close()
+        this.messageNotificationSink.close()
     }
 
-
+    fun sendProtocolMessage(message: ProtocolMessage) {
+        this.connectionMessages.put(message)
+        this.notificationByte.clear()
+        this.messageNotificationSink.write(this.notificationByte)
+    }
 }
 
-
+private class DisableWriting
 
 class Connection(
-    private val handle: LogicMessageHandle,
-    private val address: String,
-    private val messages: BlockingQueue<IConnectionMessage>,
-    private val messageNotifications: Pipe.SourceChannel,
+        private val handle: LogicMessageHandle,
+        private val address: String,
+        private val messages: BlockingQueue<ProtocolMessage>,
+        private val messageNotifications: Pipe.SourceChannel,
+        private val quitRequested: Pipe.SourceChannel,
 ) {
+
+    private val notificationBuffer = ByteBuffer.allocate(1)
+    private val socketReader = SocketReader()
+    private lateinit var socketWriter: SocketWriter
 
     fun start() {
         println("Connection: start")
-        handle.sendConnectedNotification()
 
-        val buffer = ByteBuffer.allocate(1)
+        val inetAddress = InetSocketAddress(this.address, 8080)
+        val socket: SocketChannel = try {
+            SocketChannel.open(inetAddress)
+        } catch (e: ConnectException) {
+            // Send error and wait quit.
+            this.handle.sendConnectionError()
+            this.waitQuitRequest()
+            return
+        }
+
+        this.handle.sendConnectedNotification()
+
+        this.messageNotifications.configureBlocking(false)
+        this.quitRequested.configureBlocking(false)
+        socket.configureBlocking(false)
+
+        val selector = Selector.open()
+        val messageNotificationKey = this.messageNotifications.register(selector, SelectionKey.OP_READ)
+        val quitRequestedKey = this.quitRequested.register(selector, SelectionKey.OP_READ)
+        val socketKey = socket.register(selector, SelectionKey.OP_READ)
+
         while (true) {
-            buffer.clear()
-            val result = messageNotifications.read(buffer)
-            if (result == -1) {
-                // EOF
-                return
-            } else if (result == 0) {
+            val result = selector.select()
+
+            if (result == 0) {
                 continue
             }
 
-            val message = messages.take()
-            when (message) {
-                is ConnectionQuitRequestEvent -> {
-                    println("Connection: quit")
+            if (selector.selectedKeys().remove(socketKey)) {
+                if (socketKey.isReadable) {
+                    try {
+                        this.socketReader.handleSocketRead(socket)?.also {
+                            this.parseAndSendMessage(it)
+                        }
+                    } catch (e: ConnectionQuitException) {
+                        this.handle.sendConnectionError()
+                        break
+                    }
+                }
+
+                if (socketKey.isWritable) {
+                    if (this.socketWriter.handleSocketWrite(socket) is DisableWriting) {
+                        // Disable socket writing.
+                        socketKey.interestOps(SelectionKey.OP_READ)
+                        // Enable message reading.
+                        messageNotificationKey.interestOps(SelectionKey.OP_READ)
+                    }
+                }
+            }
+
+            if (selector.selectedKeys().remove(messageNotificationKey)) {
+                this.tryReadMessage()?.also {
+                    this.socketWriter = SocketWriter(it)
+                    // Enable socket writing.
+                    socketKey.interestOps(SelectionKey.OP_READ or SelectionKey.OP_WRITE)
+                    // Disable message reading.
+                    messageNotificationKey.interestOps(0)
+                }
+            }
+
+            if (selector.selectedKeys().remove(quitRequestedKey)) {
+                if (this.checkQuitRequest()) {
                     break
                 }
             }
+        }
+
+        selector.close()
+        socket.close()
+        println("Connection: quit")
+    }
+
+    private fun checkQuitRequest(): Boolean {
+        this.notificationBuffer.clear()
+        val result = this.quitRequested.read(this.notificationBuffer)
+        if (result == -1) {
+            // EOF
+            throw Exception("Connection: unexpected EOF")
+        } else if (result == 0) {
+            return false
+        }
+
+        return true
+    }
+
+    private fun waitQuitRequest() {
+        while (true) {
+            this.notificationBuffer.clear()
+            val result = this.quitRequested.read(this.notificationBuffer)
+            if (result == -1) {
+                // EOF
+                throw Exception("Connection: unexpected EOF")
+            } else if (result == 0) {
+                continue
+            }
+            break
+        }
+    }
+
+    private fun tryReadMessage(): String? {
+        this.notificationBuffer.clear()
+        val result = this.messageNotifications.read(this.notificationBuffer)
+
+        if (result == -1) {
+            // EOF
+            throw Exception("Connection: unexpected EOF")
+        } else if (result == 0) {
+            return null
+        }
+
+        return Json.encodeToString(this.messages.take())
+    }
+
+    private fun parseAndSendMessage(message: String) {
+        try {
+            val protocolMessage = Json.decodeFromString<ProtocolMessage>(message)
+            this.handle.sendConnectionMessage(protocolMessage)
+        } catch (e: SerializationException) {
+            println("Unknown message: $message")
         }
     }
 
     fun closeSystemResources() {
         this.messageNotifications.close()
+        this.quitRequested.close()
+    }
+}
+
+class ConnectionQuitException: Exception()
+
+enum class ReadMode {
+    MESSAGE_LENGTH,
+    MESSAGE,
+}
+
+private class SocketReader {
+    var readMode: ReadMode = ReadMode.MESSAGE_LENGTH
+    val messageLengthBytes: ByteBuffer = ByteBuffer.allocate(4)
+    lateinit var messageBytes: ByteBuffer
+
+    fun handleSocketRead(socket: SocketChannel): String? {
+        val bytes = when (this.readMode) {
+            ReadMode.MESSAGE_LENGTH -> {
+                this.messageLengthBytes
+            }
+            ReadMode.MESSAGE -> {
+                this.messageBytes
+            }
+        }
+
+        while (true) {
+            val readCount = socket.read(bytes)
+            if (readCount == -1) {
+                // EOF
+                throw ConnectionQuitException()
+            } else if (readCount == 0) {
+                if (bytes.hasRemaining()) {
+                    return null
+                } else {
+                    break
+                }
+            }
+        }
+
+        when (this.readMode) {
+            ReadMode.MESSAGE_LENGTH -> {
+                this.messageBytes = ByteBuffer.allocate(this.messageLengthBytes.getInt(0))
+                this.readMode = ReadMode.MESSAGE
+            }
+            ReadMode.MESSAGE -> {
+                val message = this.messageBytes.array().decodeToString()
+                this.readMode = ReadMode.MESSAGE_LENGTH
+                this.messageLengthBytes.clear()
+                return message
+            }
+        }
+
+        return null
+    }
+}
+
+private class SocketWriter {
+    val bytes: ByteBuffer
+
+    constructor(message: String) {
+        val messageByteArray = message.encodeToByteArray()
+        // TODO: Check integer overflow.
+        this.bytes = ByteBuffer.allocate(messageByteArray.size + 4)
+        this.bytes.putInt(messageByteArray.size)
+        this.bytes.put(messageByteArray)
+        this.bytes.rewind()
     }
 
-    fun connect() {
-        var socket = Socket(this.address, 8080)
-
-        var input = socket.getInputStream()
-
-        val dataStream = DataInputStream(input)
-
-        var messageBuffer = ByteArrayOutputStream()
-        var readBuffer = ByteArray(1024);
+    fun handleSocketWrite(socket: SocketChannel): DisableWriting? {
         while (true) {
-            messageBuffer.reset()
+            val writeCount = socket.write(this.bytes)
 
-            val messageSize = dataStream.readInt()
-            var messageBytesMissing = messageSize
-            var nextReadSize = min(readBuffer.size, messageBytesMissing)
-            while (true) {
-                val readResult = dataStream.read(readBuffer, 0, nextReadSize)
-
-                if (readResult == -1) {
-                    // EOF
-                    return
+            if (writeCount == 0) {
+                return if (this.bytes.hasRemaining()) {
+                    null
                 } else {
-                    messageBuffer.write(readBuffer, 0, readResult)
-                    messageBytesMissing -= readResult
-                    nextReadSize = min(readBuffer.size, messageBytesMissing)
-                }
-
-                if (nextReadSize == 0) {
-                    val message = messageBuffer.toString("UTF-8")
-                    println(message)
-                    break
+                    DisableWriting()
                 }
             }
         }
     }
 }
-
