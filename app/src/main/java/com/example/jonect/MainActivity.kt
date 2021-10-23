@@ -10,9 +10,12 @@ import android.content.ServiceConnection
 import androidx.appcompat.app.AppCompatActivity
 import android.os.Bundle
 import android.os.IBinder
+import android.text.Editable
+import android.text.TextWatcher
 import android.widget.Button
 import android.widget.EditText
 import android.widget.TextView
+import androidx.core.widget.addTextChangedListener
 
 class ServiceConnectionHandler(private val activity: MainActivity): ServiceConnection {
     override fun onServiceConnected(p0: ComponentName?, serviceBinder: IBinder?) {
@@ -31,6 +34,20 @@ class ServiceConnectionHandler(private val activity: MainActivity): ServiceConne
             throw Exception("Activity: Service disconnected")
         }
     }
+}
+
+class IpAddressCheck(private val connectButton: Button): TextWatcher {
+    override fun afterTextChanged(text: Editable?) {
+        if (text == null) {
+            return
+        }
+        this.connectButton.isEnabled = text.startsWith("192.168.") ||
+                text.startsWith("10.") ||
+                text.startsWith("127.")
+    }
+
+    override fun beforeTextChanged(p0: CharSequence?, p1: Int, p2: Int, p3: Int) {}
+    override fun onTextChanged(p0: CharSequence?, p1: Int, p2: Int, p3: Int) {}
 }
 
 class MainActivity : AppCompatActivity() {
@@ -64,6 +81,8 @@ class MainActivity : AppCompatActivity() {
                 this.status.text = it
             }
         }
+
+        this.address.addTextChangedListener(IpAddressCheck(this.connectButton))
 
         val intent = Intent(this, LogicService::class.java)
         this.startService(intent)
