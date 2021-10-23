@@ -5,6 +5,7 @@
 package com.example.jonect
 
 import android.content.ComponentName
+import android.content.Context
 import android.content.Intent
 import android.content.ServiceConnection
 import androidx.appcompat.app.AppCompatActivity
@@ -15,7 +16,6 @@ import android.text.TextWatcher
 import android.widget.Button
 import android.widget.EditText
 import android.widget.TextView
-import androidx.core.widget.addTextChangedListener
 
 class ServiceConnectionHandler(private val activity: MainActivity): ServiceConnection {
     override fun onServiceConnected(p0: ComponentName?, serviceBinder: IBinder?) {
@@ -55,6 +55,8 @@ class MainActivity : AppCompatActivity() {
     private lateinit var status: TextView
     private lateinit var connectButton: Button
 
+    private var preferenceAddress: String? = null
+
     var service: LogicService? = null
     var quitStarted = false
 
@@ -79,6 +81,16 @@ class MainActivity : AppCompatActivity() {
         savedInstanceState?.also { bundle ->
             bundle.getString(STATE_TEXT)?.also {
                 this.status.text = it
+            }
+        }
+
+        val sharedPreferences = this.getPreferences(Context.MODE_PRIVATE)
+        val previousAddress = sharedPreferences.getString(ADDRESS_KEY, null)
+        if (previousAddress != null) {
+            this.preferenceAddress = previousAddress
+
+            if (savedInstanceState == null) {
+                this.address.setText(previousAddress)
             }
         }
 
@@ -145,6 +157,13 @@ class MainActivity : AppCompatActivity() {
                 this.unbindService(this.serviceConnectionHandler)
             }
             this.stopService(intent)
+
+            val currentAddress = this.address.text.toString()
+            if (this.preferenceAddress == null ||
+                currentAddress != this.preferenceAddress) {
+                val sharedPreferences = this.getPreferences(Context.MODE_PRIVATE)
+                sharedPreferences.edit().putString(ADDRESS_KEY, currentAddress).apply()
+            }
         }
     }
 
@@ -156,6 +175,7 @@ class MainActivity : AppCompatActivity() {
 
     companion object {
         const val STATE_TEXT = "status"
+        const val ADDRESS_KEY = "address"
     }
 
 }
