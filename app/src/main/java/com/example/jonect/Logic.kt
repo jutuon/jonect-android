@@ -32,6 +32,12 @@ class ConnectionMessage(val message: ProtocolMessage): ILogicStatusEvent {
     }
 }
 
+class AudioStreamError(private val message: String): ILogicStatusEvent {
+    override fun toString(): String {
+        return "AudioStreamError: $message"
+    }
+}
+
 interface ILogicStatusEvent
 
 class LogicThread: Thread {
@@ -96,6 +102,10 @@ class LogicMessageHandle(private val messageHandler: Handler) {
     fun sendConnectionMessage(message: ProtocolMessage) {
         this.sendMessage(ConnectionMessage(message))
     }
+
+    fun sendAudioStreamError(error: String) {
+        this.sendMessage(AudioStreamError(error))
+    }
 }
 
 
@@ -104,6 +114,8 @@ class Logic(val serviceHandle: ServiceHandle) {
 
 
     private var connection: ConnectionThread? = null
+    private var audio: AudioThread? = null
+    private var connectionAddress: String? = null
 
     fun initLogicMessageHandle(handle: LogicMessageHandle) {
         this.logicMessageHandle = handle
@@ -125,8 +137,13 @@ class Logic(val serviceHandle: ServiceHandle) {
                 connection.start()
 
                 this.connection = connection
+                this.connectionAddress = event.address
             }
             is DisconnectEvent -> {
+                this.audio?.also {
+                    it.runQuit()
+                    this.audio = null
+                }
                 this.connection?.also {
                     it.runQuit()
                     this.connection = null
@@ -138,16 +155,32 @@ class Logic(val serviceHandle: ServiceHandle) {
                 this.connection?.sendProtocolMessage(ClientInfo("0.1", "Test client"))
             }
             is ConnectionError -> {
+                this.audio?.also {
+                    it.runQuit()
+                    this.audio = null
+                }
                 this.connection?.also {
                     it.runQuit()
                     this.connection = null
                     this.updateServiceStatus(ConnectionError())
                 }
             }
+            is AudioStreamError -> {
+                println(event.toString())
+                this.updateServiceStatus(event)
+                this.audio?.also {
+                    it.runQuit()
+                    this.audio = null
+                }
+            }
             is ConnectionMessage -> {
                 this.handleProtocolMessage(event.message)
             }
             is QuitRequestEvent -> {
+                this.audio?.run {
+                    runQuit()
+                }
+
                 this.connection?.run {
                     runQuit()
                 }
@@ -172,8 +205,13 @@ class Logic(val serviceHandle: ServiceHandle) {
                 this.connection?.sendProtocolMessage(PingResponse)
             }
             is PlayAudioStream -> {
-                // TODO
+
                 println("Audio stream play request received. Message: $message")
+                if (this.audio == null) {
+                    val info = AudioStreamInfo(this.connectionAddress!!, message)
+                    this.audio = AudioThread(this.logicMessageHandle, info)
+                    this.audio!!.start()
+                }
             }
             else -> {
                 println("Unsupported message $message received.")
