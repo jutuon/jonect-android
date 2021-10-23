@@ -14,6 +14,7 @@ import android.os.IBinder
 import android.text.Editable
 import android.text.TextWatcher
 import android.widget.Button
+import android.widget.CheckBox
 import android.widget.EditText
 import android.widget.TextView
 
@@ -54,8 +55,10 @@ class MainActivity : AppCompatActivity() {
     private lateinit var address: EditText
     private lateinit var status: TextView
     private lateinit var connectButton: Button
+    private lateinit var connectAutomaticallyCheckBox: CheckBox
 
     private var preferenceAddress: String? = null
+    private var connectAutomatically = false
 
     var service: LogicService? = null
     var quitStarted = false
@@ -71,6 +74,17 @@ class MainActivity : AppCompatActivity() {
             this.handleConnectButtonOnClick()
         }
 
+        val sharedPreferences = this.getPreferences(Context.MODE_PRIVATE)
+
+        this.connectAutomaticallyCheckBox = this.findViewById(R.id.checkbox_connect_automatically)
+        this.connectAutomaticallyCheckBox.isChecked = sharedPreferences.getBoolean(CONNECT_AUTOMATICALLY_KEY, false)
+        this.connectAutomaticallyCheckBox.setOnClickListener {
+            sharedPreferences
+                .edit()
+                .putBoolean(CONNECT_AUTOMATICALLY_KEY, this.connectAutomaticallyCheckBox.isChecked)
+                .apply()
+        }
+
         this.address = this.findViewById(R.id.edit_text_server_address)
         this.status = this.findViewById(R.id.text_view_status)
 
@@ -84,13 +98,15 @@ class MainActivity : AppCompatActivity() {
             }
         }
 
-        val sharedPreferences = this.getPreferences(Context.MODE_PRIVATE)
         val previousAddress = sharedPreferences.getString(ADDRESS_KEY, null)
         if (previousAddress != null) {
             this.preferenceAddress = previousAddress
 
             if (savedInstanceState == null) {
                 this.address.setText(previousAddress)
+                if (this.connectAutomaticallyCheckBox.isChecked) {
+                    this.connectAutomatically = true
+                }
             }
         }
 
@@ -111,8 +127,11 @@ class MainActivity : AppCompatActivity() {
             this.serviceServerConnectedUpdate(it.getServerConnected())
             it.setCurrentConnectedActivity(this)
 
-            // Connect to server automatically.
-            this.handleConnectButtonOnClick()
+            if (this.connectAutomatically) {
+                // Connect to server automatically.
+                this.handleConnectButtonOnClick()
+                this.connectAutomatically = false
+            }
         }
     }
 
@@ -176,6 +195,7 @@ class MainActivity : AppCompatActivity() {
     companion object {
         const val STATE_TEXT = "status"
         const val ADDRESS_KEY = "address"
+        const val CONNECT_AUTOMATICALLY_KEY = "connect_automatically"
     }
 
 }
