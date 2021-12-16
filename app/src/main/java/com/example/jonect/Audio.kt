@@ -1,6 +1,7 @@
 package com.example.jonect
 
 import android.media.*
+import android.os.Build
 import android.provider.Settings
 import java.lang.Exception
 import java.net.ConnectException
@@ -84,7 +85,7 @@ class AudioPlayer(
     private val quitRequested: Pipe.SourceChannel,
 ) {
     private val notificationBuffer = ByteBuffer.allocate(1)
-    private val audioBufferManager = AudioBufferManager()
+    private var audioTrackPlaying = false
 
     fun start() {
         println("AudioPlayer: start")
@@ -136,9 +137,6 @@ class AudioPlayer(
             AudioManager.AUDIO_SESSION_ID_GENERATE,
         )
 
-        val audioPlayerThread = AudioPlayerThread(this.audioBufferManager, audioTrack)
-        audioPlayerThread.start()
-
         val inetAddress = InetSocketAddress(this.streamInfo.address, this.streamInfo.message.port)
         val socket: SocketChannel = try {
             SocketChannel.open(inetAddress)
@@ -158,7 +156,8 @@ class AudioPlayer(
         val quitRequestedKey = this.quitRequested.register(selector, SelectionKey.OP_READ)
         val socketKey = socket.register(selector, SelectionKey.OP_READ)
 
-        var currentAudioBuffer = audioBufferManager.getWriteableBuffer()
+        // Use buffer which matches current framesize: buffer size % (bytes per sample * channels) == 0
+        var currentAudioBuffer = ByteBuffer.allocate(512)
 
         while (true) {
             val result = selector.select()
@@ -176,8 +175,12 @@ class AudioPlayer(
                         break
                     } else if (result != 0) {
                         if (!currentAudioBuffer.hasRemaining()) {
-                            this.audioBufferManager.pushNewAudioData(currentAudioBuffer)
-                            currentAudioBuffer = this.audioBufferManager.getWriteableBuffer()
+                            // When buffer is full of data write it to AudioTrack.
+                            if (this.handleData(currentAudioBuffer, audioTrack) is Quit) {
+                                this.handle.sendAudioStreamError("AudioTrack error")
+                                break
+                            }
+                            currentAudioBuffer.clear()
                         }
                     }
                 }
@@ -196,9 +199,10 @@ class AudioPlayer(
             }
         }
 
+        audioTrack.pause()
+        audioTrack.release()
         selector.close()
         socket.close()
-        audioPlayerThread.runQuit()
 
         println("AudioPlayer: quit")
     }
@@ -206,6 +210,35 @@ class AudioPlayer(
     fun closeSystemResources() {
         this.messageNotifications.close()
         this.quitRequested.close()
+    }
+
+    private fun handleData(buffer: ByteBuffer, audioTrack: AudioTrack): Quit? {
+        buffer.rewind()
+
+        val writeCount = buffer.remaining()
+        val result = audioTrack.write(
+            buffer,
+            writeCount,
+            AudioTrack.WRITE_BLOCKING)
+
+        if (result < 0) {
+            println("AudioTrack write error $result detected")
+            return Quit()
+        }
+
+        // TODO: Handle ERROR_DEAD_OBJECT.
+
+        if (result < writeCount) {
+            println("AudioTrack did not write all bytes")
+            return Quit()
+        }
+
+        if (!this.audioTrackPlaying) {
+            audioTrack.play()
+            this.audioTrackPlaying = true
+        }
+
+        return null
     }
 
     private fun checkQuitRequest(): Boolean {
@@ -250,118 +283,4 @@ class AudioPlayer(
     }
 }
 
-class AudioBufferManager {
-
-    private val writeableBuffers: BlockingQueue<ByteBuffer> =
-        ArrayBlockingQueue(32)
-    private val playBuffers: BlockingQueue<ByteBuffer> =
-        ArrayBlockingQueue(32)
-
-    fun getWriteableBuffer(): ByteBuffer {
-        val buffer = writeableBuffers.poll() ?: return ByteBuffer.allocate(512)
-        buffer.clear()
-        return buffer
-    }
-
-    fun pushWritableBuffer(buffer: ByteBuffer) {
-        if (!this.writeableBuffers.offer(buffer)) {
-            println("AudioBufferManager: No space in writableBuffers queue.")
-        }
-    }
-
-    fun waitNewAudioData(): ByteBuffer {
-        val buffer = this.playBuffers.take()
-        buffer.rewind()
-        return buffer
-    }
-
-    fun pushNewAudioData(data: ByteBuffer) {
-        if (!this.playBuffers.offer(data)) {
-            println("AudioBufferManager: No space in playBuffers queue.")
-            this.playBuffers.put(data)
-        }
-    }
-}
-
-class AudioPlayerThread(
-    private val audioBufferManager: AudioBufferManager,
-    private val audioTrack: AudioTrack,
-) : Thread() {
-    private val quitReady: AtomicBoolean = AtomicBoolean(false)
-
-    override fun run() {
-        val audio = AudioTrackManager(this.audioTrack, this.audioBufferManager)
-        for (i in 1..2 ) {
-            if (audio.runWriteIteration() is Quit) {
-                return
-            }
-        }
-        this.audioTrack.play()
-
-        while (true) {
-            if (audio.runWriteIteration() is Quit) {
-                break
-            }
-        }
-
-        this.quitReady.set(true)
-    }
-
-    fun runQuit() {
-        this.audioTrack.pause()
-        while (true) {
-            this.interrupt()
-            Thread.sleep(50)
-            if (this.quitReady.get()) {
-                break
-            }
-        }
-        this.audioTrack.release()
-        this.join()
-    }
-
-}
-
 private class Quit
-
-private class AudioTrackManager(
-    private val audioTrack: AudioTrack,
-    private val audioBufferManager: AudioBufferManager
-) {
-    private var currentBuffer: ByteBuffer
-
-    init {
-        this.currentBuffer = audioBufferManager.waitNewAudioData()
-    }
-
-    fun runWriteIteration(): Quit? {
-        val writeCount = this.currentBuffer.remaining()
-        val result = this.audioTrack.write(
-            this.currentBuffer,
-            writeCount,
-            AudioTrack.WRITE_BLOCKING)
-
-        if (result < 0) {
-            println("AudioTrack write error $result detected")
-            return Quit()
-        }
-
-        // TODO: Handle ERROR_DEAD_OBJECT.
-
-        if (result < writeCount) {
-            println("AudioTrack did not write all bytes")
-            return Quit()
-        }
-
-        try {
-            if (!this.currentBuffer.hasRemaining()) {
-                this.audioBufferManager.pushWritableBuffer(this.currentBuffer)
-                this.currentBuffer = this.audioBufferManager.waitNewAudioData()
-            }
-        } catch (e: InterruptedException) {
-            return Quit()
-        }
-
-        return null
-    }
-}
