@@ -144,10 +144,9 @@ class AudioPlayer(
         val socketBufferSize = 32
         var currentAudioBuffer = ByteBuffer.allocate(socketBufferSize)
 
-        // TODO: Protocol message for asking native sample rate.
         // TODO: Decode opus codec.
 
-        val nativeSampleRate = AudioTrack.getNativeOutputSampleRate(AudioFormat.ENCODING_PCM_16BIT)
+        val nativeSampleRate = AudioPlayer.getNativeSampleRate()
 
         println("AudioTrack native sample rate is $nativeSampleRate")
 
@@ -238,6 +237,12 @@ class AudioPlayer(
         socket.close()
 
         println("AudioPlayer: quit")
+    }
+
+    companion object {
+        fun getNativeSampleRate(): Int {
+            return AudioTrack.getNativeOutputSampleRate(AudioFormat.ENCODING_PCM_16BIT)
+        }
     }
 
     fun closeSystemResources() {

@@ -39,4 +39,5 @@ data class PlayAudioStream(
 data class ClientInfo(
         val version: String,
         val id: String,
+        val native_sample_rate: Int,
 ): ProtocolMessage()

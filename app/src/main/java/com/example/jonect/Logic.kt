@@ -152,7 +152,7 @@ class Logic(val serviceHandle: ServiceHandle) {
             }
             is ConnectedEvent -> {
                 this.updateServiceStatus(event)
-                this.connection?.sendProtocolMessage(ClientInfo("0.1", "Test client"))
+                this.connection?.sendProtocolMessage(ClientInfo("0.1", "Test client", AudioPlayer.getNativeSampleRate()))
             }
             is ConnectionError -> {
                 this.audio?.also {
