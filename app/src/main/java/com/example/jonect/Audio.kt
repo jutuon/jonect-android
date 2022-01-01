@@ -86,6 +86,8 @@ class AudioPlayer(
 ) {
     private val notificationBuffer = ByteBuffer.allocate(1)
     private var audioTrackPlaying = false
+    private var underrunCount = 0
+    private var initialBufferingCounter = 0
 
     fun start() {
         println("AudioPlayer: start")
@@ -129,13 +131,47 @@ class AudioPlayer(
             }
         }
 
-        val audioTrack = AudioTrack(
-            audioAttributes,
-            audioFormat.build(),
-            4096,
-            AudioTrack.MODE_STREAM,
-            AudioManager.AUDIO_SESSION_ID_GENERATE,
+        val minBufferSize = AudioTrack.getMinBufferSize(
+            this.streamInfo.message.rate,
+            this.streamInfo.message.channels.toInt(),
+            AudioFormat.ENCODING_PCM_16BIT,
         )
+
+        println("AudioTrack min buffer size is $minBufferSize")
+
+        // Buffer for reading the socket.
+        // Use buffer which matches current framesize: buffer size % (bytes per sample * channels) == 0
+        val socketBufferSize = 32
+        var currentAudioBuffer = ByteBuffer.allocate(socketBufferSize)
+
+        // TODO: Protocol message for asking native sample rate.
+        // TODO: Decode opus codec.
+
+        val nativeSampleRate = AudioTrack.getNativeOutputSampleRate(AudioFormat.ENCODING_PCM_16BIT)
+
+        println("AudioTrack native sample rate is $nativeSampleRate")
+
+        var audioTrack = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            var builder = AudioTrack.Builder()
+                .setAudioAttributes(audioAttributes)
+                .setAudioFormat(audioFormat.build())
+                .setTransferMode(AudioTrack.MODE_STREAM)
+                .setBufferSizeInBytes(minBufferSize)
+
+            if (nativeSampleRate == this.streamInfo.message.rate) {
+                builder.setPerformanceMode(AudioTrack.PERFORMANCE_MODE_LOW_LATENCY)
+                println("AudioTrack.PERFORMANCE_MODE_LOW_LATENCY is enabled")
+            }
+            builder.build()
+        } else {
+            AudioTrack(
+                audioAttributes,
+                audioFormat.build(),
+                minBufferSize,
+                AudioTrack.MODE_STREAM,
+                AudioManager.AUDIO_SESSION_ID_GENERATE,
+            )
+        }
 
         val inetAddress = InetSocketAddress(this.streamInfo.address, this.streamInfo.message.port)
         val socket: SocketChannel = try {
@@ -155,9 +191,6 @@ class AudioPlayer(
         val messageNotificationKey = this.messageNotifications.register(selector, SelectionKey.OP_READ)
         val quitRequestedKey = this.quitRequested.register(selector, SelectionKey.OP_READ)
         val socketKey = socket.register(selector, SelectionKey.OP_READ)
-
-        // Use buffer which matches current framesize: buffer size % (bytes per sample * channels) == 0
-        var currentAudioBuffer = ByteBuffer.allocate(512)
 
         while (true) {
             val result = selector.select()
@@ -233,9 +266,22 @@ class AudioPlayer(
             return Quit()
         }
 
+        if (this.initialBufferingCounter < 4) {
+            this.initialBufferingCounter += 1
+            return null
+        }
+
         if (!this.audioTrackPlaying) {
+            println("AudioTrack: play")
             audioTrack.play()
             this.audioTrackPlaying = true
+        } else {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+                if (audioTrack.underrunCount > this.underrunCount) {
+                    this.underrunCount = audioTrack.underrunCount
+                    println("Underrun count: ${this.underrunCount}")
+                }
+            }
         }
 
         return null
