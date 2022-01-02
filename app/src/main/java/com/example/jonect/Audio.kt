@@ -89,6 +89,8 @@ class AudioPlayer(
     private var underrunCount = 0
     private var initialBufferingCounter = 0
 
+    private var opusDecoder: OpusDecoder? = null
+
     fun start() {
         println("AudioPlayer: start")
 
@@ -123,6 +125,15 @@ class AudioPlayer(
                     audioFormat.setEncoding(AudioFormat.ENCODING_PCM_16BIT)
                 }
             }
+            "opus" -> {
+                this.opusDecoder = OpusDecoder()
+                if (!this.opusDecoder!!.init()) {
+                    // Send error and wait quit.
+                    this.handle.sendAudioStreamError("Couldn't create Opus decoder.")
+                    this.waitQuitRequest()
+                    return
+                }
+            }
             else -> {
                 // Send error and wait quit.
                 this.handle.sendAudioStreamError("Unsupported audio format: ${this.streamInfo.message.format}")
@@ -140,8 +151,14 @@ class AudioPlayer(
         println("AudioTrack min buffer size is $minBufferSize")
 
         // Buffer for reading the socket.
-        // Use buffer which matches current framesize: buffer size % (bytes per sample * channels) == 0
-        val socketBufferSize = 32
+        val socketBufferSize = if (this.opusDecoder == null) {
+            // Use buffer which matches current framesize: buffer size % (bytes per sample * channels) == 0
+            32
+        } else {
+            // TODO
+            512
+        }
+
         var currentAudioBuffer = ByteBuffer.allocate(socketBufferSize)
 
         // TODO: Decode opus codec.
@@ -207,11 +224,20 @@ class AudioPlayer(
                         break
                     } else if (result != 0) {
                         if (!currentAudioBuffer.hasRemaining()) {
-                            // When buffer is full of data write it to AudioTrack.
-                            if (this.handleData(currentAudioBuffer, audioTrack) is Quit) {
-                                this.handle.sendAudioStreamError("AudioTrack error")
-                                break
+                            if (this.opusDecoder == null) {
+                                // When buffer is full of data write it to AudioTrack.
+                                if (this.handleData(currentAudioBuffer, audioTrack) is Quit) {
+                                    this.handle.sendAudioStreamError("AudioTrack error")
+                                    break
+                                }
+                            } else {
+                                if (this.opusDecoder!!.decodeBytes(currentAudioBuffer, this, audioTrack) is Quit) {
+                                    this.handle.sendAudioStreamError("AudioTrack error")
+                                    break
+                                }
                             }
+
+
                             currentAudioBuffer.clear()
                         }
                     }
@@ -250,7 +276,7 @@ class AudioPlayer(
         this.quitRequested.close()
     }
 
-    private fun handleData(buffer: ByteBuffer, audioTrack: AudioTrack): Quit? {
+    fun handleData(buffer: ByteBuffer, audioTrack: AudioTrack): Quit? {
         buffer.rewind()
 
         val writeCount = buffer.remaining()
@@ -334,4 +360,75 @@ class AudioPlayer(
     }
 }
 
-private class Quit
+class Quit
+
+private class OpusDecoder {
+    private lateinit var mediaCodec: MediaCodec
+
+    fun init(): Boolean {
+        val codecList = MediaCodecList(MediaCodecList.REGULAR_CODECS)
+        val audioFormat = MediaFormat.createAudioFormat(
+            MediaFormat.MIMETYPE_AUDIO_OPUS,
+            48000,
+            2,
+        )
+
+        // TODO: Identification header
+        val identificationHeaderCsd0 = ByteBuffer.allocate(15)
+
+        audioFormat.setByteBuffer("csd-0", ByteBuffer.allocate(1))
+        audioFormat.setByteBuffer("csd-1", ByteBuffer.allocate(8))
+        audioFormat.setByteBuffer("csd-2", ByteBuffer.allocate(8))
+
+        val decoderResult = codecList.findDecoderForFormat(audioFormat) ?: return false
+
+        println("Decoder '$decoderResult' created")
+
+        this.mediaCodec = MediaCodec.createByCodecName(decoderResult)
+
+        this.mediaCodec.configure(audioFormat, null, null, 0)
+        println("Input format:")
+        println(this.mediaCodec.inputFormat)
+        println("Output format:")
+        println(this.mediaCodec.outputFormat)
+
+
+        this.mediaCodec.start()
+
+        return true
+    }
+
+    fun decodeBytes(inputData: ByteBuffer, audioPlayer: AudioPlayer, audioTrack: AudioTrack): Quit? {
+        inputData.rewind()
+
+        while (inputData.hasRemaining()) {
+            // Negative value means that this method blocks and there is no timeout.
+            val inputId = this.mediaCodec.dequeueInputBuffer(100)
+            if (inputId >= 0) {
+                val buffer = this.mediaCodec.getInputBuffer(inputId)
+                buffer!!.clear()
+                buffer!!.put(inputData)
+                this.mediaCodec.queueInputBuffer(inputId, 0, buffer!!.position(), 0, 0)
+            }
+
+            val bufferInfo = MediaCodec.BufferInfo()
+            bufferInfo.set(0, 2*2*32, 0, 0)
+            val outputId = this.mediaCodec.dequeueOutputBuffer(bufferInfo, 100)
+            if (outputId >= 0) {
+                val buffer = this.mediaCodec.getOutputBuffer(outputId)
+                buffer!!.rewind()
+                if (audioPlayer.handleData(buffer!!, audioTrack) is Quit) {
+                    return Quit()
+                }
+            }
+        }
+
+        return null
+
+    }
+
+    fun quit() {
+        this.mediaCodec.stop()
+        this.mediaCodec.release()
+    }
+}
