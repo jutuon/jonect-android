@@ -2,6 +2,7 @@ package com.example.jonect
 
 import android.media.*
 import android.os.Build
+import android.os.Process
 import android.provider.Settings
 import java.lang.Exception
 import java.net.ConnectException
@@ -93,6 +94,21 @@ class AudioPlayer(
 
     fun start() {
         println("AudioPlayer: start")
+
+        try {
+            Process.setThreadPriority(Process.THREAD_PRIORITY_AUDIO)
+        } catch (e: SecurityException) {
+            val error = if (e.message != null) {
+                e.message
+            } else {
+                "no error message."
+            }
+
+            println("Setting thread priority failed: $error")
+        }
+
+        val threadPriority = Process.getThreadPriority(Process.myTid());
+        println("Current thread priority: $threadPriority")
 
         val audioAttributes = AudioAttributes.Builder()
             .setContentType(AudioAttributes.CONTENT_TYPE_MUSIC)

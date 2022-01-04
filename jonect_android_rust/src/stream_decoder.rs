@@ -39,6 +39,8 @@ impl StreamDecoder {
     }
 
     pub fn start(&mut self) {
+        Self::config_thread_priority();
+
         let address = ("127.0.0.1", 12345).to_socket_addrs().unwrap().next().unwrap();
         let listener = TcpListener::bind(address).unwrap();
         let (mut java_audio_thread_connection, _) = listener.accept().unwrap();
@@ -104,5 +106,30 @@ impl StreamDecoder {
             }
         }
 
+    }
+
+    fn config_thread_priority() {
+        let result = unsafe {
+            // Set thread priority for current thread. Currently on Linux
+            // libc::setpriority will set thread nice value but this might
+            // change in the future. Alternative would be sched_setattr system
+            // call. Value of Android API constant Process.THREAD_PRIORITY_AUDIO
+            // is -16.
+            libc::setpriority(libc::PRIO_PROCESS, 0, -16)
+        };
+
+        if result == -1 {
+            android_println("Setting thread priority failed.");
+        }
+
+        let get_result = unsafe {
+            libc::getpriority(libc::PRIO_PROCESS, 0)
+        };
+
+        if get_result == -1 {
+            android_println("libc::getpriority returned -1 which might be error or not.");
+        } else {
+            android_println(&format!("Thread priority: {}", get_result));
+        }
     }
 }
