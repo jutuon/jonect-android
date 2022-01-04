@@ -127,12 +127,10 @@ class AudioPlayer(
             }
             "opus" -> {
                 this.opusDecoder = OpusDecoder()
-                if (!this.opusDecoder!!.init()) {
-                    // Send error and wait quit.
-                    this.handle.sendAudioStreamError("Couldn't create Opus decoder.")
-                    this.waitQuitRequest()
-                    return
-                }
+                this.opusDecoder!!.startDecodingThread(streamInfo.address, streamInfo.message.port)
+                // TODO: It is possible that Rust code has not yet created the server socket
+                //  for sending PCM data to here.
+                audioFormat.setEncoding(AudioFormat.ENCODING_PCM_16BIT)
             }
             else -> {
                 // Send error and wait quit.
@@ -151,17 +149,9 @@ class AudioPlayer(
         println("AudioTrack min buffer size is $minBufferSize")
 
         // Buffer for reading the socket.
-        val socketBufferSize = if (this.opusDecoder == null) {
-            // Use buffer which matches current framesize: buffer size % (bytes per sample * channels) == 0
-            32
-        } else {
-            // TODO
-            512
-        }
-
+        // Use buffer which matches current framesize: buffer size % (bytes per sample * channels) == 0
+        val socketBufferSize = 32
         var currentAudioBuffer = ByteBuffer.allocate(socketBufferSize)
-
-        // TODO: Decode opus codec.
 
         val nativeSampleRate = AudioPlayer.getNativeSampleRate()
 
@@ -189,7 +179,16 @@ class AudioPlayer(
             )
         }
 
-        val inetAddress = InetSocketAddress(this.streamInfo.address, this.streamInfo.message.port)
+        var address = this.streamInfo.address
+        var port = this.streamInfo.message.port
+
+        if (this.opusDecoder != null) {
+            // Connect to Opus decoder thread.
+            address = "127.0.0.1"
+            port = 12345
+        }
+
+        val inetAddress = InetSocketAddress(address, port)
         val socket: SocketChannel = try {
             SocketChannel.open(inetAddress)
         } catch (e: ConnectException) {
@@ -217,6 +216,7 @@ class AudioPlayer(
 
             if (selector.selectedKeys().remove(socketKey)) {
                 if (socketKey.isReadable) {
+                    // PCM audio stream
                     val result = socket.read(currentAudioBuffer)
 
                     if (result == -1) {
@@ -224,19 +224,12 @@ class AudioPlayer(
                         break
                     } else if (result != 0) {
                         if (!currentAudioBuffer.hasRemaining()) {
-                            if (this.opusDecoder == null) {
-                                // When buffer is full of data write it to AudioTrack.
-                                if (this.handleData(currentAudioBuffer, audioTrack) is Quit) {
-                                    this.handle.sendAudioStreamError("AudioTrack error")
-                                    break
-                                }
-                            } else {
-                                if (this.opusDecoder!!.decodeBytes(currentAudioBuffer, this, audioTrack) is Quit) {
-                                    this.handle.sendAudioStreamError("AudioTrack error")
-                                    break
-                                }
-                            }
 
+                            // When buffer is full of data write it to AudioTrack.
+                            if (this.handleData(currentAudioBuffer, audioTrack) is Quit) {
+                                this.handle.sendAudioStreamError("AudioTrack error")
+                                break
+                            }
 
                             currentAudioBuffer.clear()
                         }
@@ -262,6 +255,10 @@ class AudioPlayer(
         selector.close()
         socket.close()
 
+        if (this.opusDecoder != null) {
+            this.opusDecoder!!.quit()
+        }
+
         println("AudioPlayer: quit")
     }
 
@@ -276,7 +273,7 @@ class AudioPlayer(
         this.quitRequested.close()
     }
 
-    fun handleData(buffer: ByteBuffer, audioTrack: AudioTrack): Quit? {
+    private fun handleData(buffer: ByteBuffer, audioTrack: AudioTrack): Quit? {
         buffer.rewind()
 
         val writeCount = buffer.remaining()
@@ -362,73 +359,12 @@ class AudioPlayer(
 
 class Quit
 
+// This class is not thread safe. Use this class only from one thread.
 private class OpusDecoder {
-    private lateinit var mediaCodec: MediaCodec
-
-    fun init(): Boolean {
-        val codecList = MediaCodecList(MediaCodecList.REGULAR_CODECS)
-        val audioFormat = MediaFormat.createAudioFormat(
-            MediaFormat.MIMETYPE_AUDIO_OPUS,
-            48000,
-            2,
-        )
-
-        // TODO: Identification header
-        val identificationHeaderCsd0 = ByteBuffer.allocate(15)
-
-        audioFormat.setByteBuffer("csd-0", ByteBuffer.allocate(1))
-        audioFormat.setByteBuffer("csd-1", ByteBuffer.allocate(8))
-        audioFormat.setByteBuffer("csd-2", ByteBuffer.allocate(8))
-
-        val decoderResult = codecList.findDecoderForFormat(audioFormat) ?: return false
-
-        println("Decoder '$decoderResult' created")
-
-        this.mediaCodec = MediaCodec.createByCodecName(decoderResult)
-
-        this.mediaCodec.configure(audioFormat, null, null, 0)
-        println("Input format:")
-        println(this.mediaCodec.inputFormat)
-        println("Output format:")
-        println(this.mediaCodec.outputFormat)
-
-
-        this.mediaCodec.start()
-
-        return true
+    init {
+        System.loadLibrary("jonect_android_rust")
     }
 
-    fun decodeBytes(inputData: ByteBuffer, audioPlayer: AudioPlayer, audioTrack: AudioTrack): Quit? {
-        inputData.rewind()
-
-        while (inputData.hasRemaining()) {
-            // Negative value means that this method blocks and there is no timeout.
-            val inputId = this.mediaCodec.dequeueInputBuffer(100)
-            if (inputId >= 0) {
-                val buffer = this.mediaCodec.getInputBuffer(inputId)
-                buffer!!.clear()
-                buffer!!.put(inputData)
-                this.mediaCodec.queueInputBuffer(inputId, 0, buffer!!.position(), 0, 0)
-            }
-
-            val bufferInfo = MediaCodec.BufferInfo()
-            bufferInfo.set(0, 2*2*32, 0, 0)
-            val outputId = this.mediaCodec.dequeueOutputBuffer(bufferInfo, 100)
-            if (outputId >= 0) {
-                val buffer = this.mediaCodec.getOutputBuffer(outputId)
-                buffer!!.rewind()
-                if (audioPlayer.handleData(buffer!!, audioTrack) is Quit) {
-                    return Quit()
-                }
-            }
-        }
-
-        return null
-
-    }
-
-    fun quit() {
-        this.mediaCodec.stop()
-        this.mediaCodec.release()
-    }
+    external fun startDecodingThread(address: String, port: Int)
+    external fun quit()
 }

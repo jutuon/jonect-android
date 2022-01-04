@@ -6,6 +6,13 @@ plugins {
 
 android {
     compileSdk 31
+    ndkVersion "21.4.7075529"
+
+    externalNativeBuild {
+        cmake {
+            version = "3.18.1"
+        }
+    }
 
     defaultConfig {
         applicationId "com.example.jonect"
@@ -41,4 +48,19 @@ dependencies {
     testImplementation 'junit:junit:4.+'
     androidTestImplementation 'androidx.test.ext:junit:1.1.3'
     androidTestImplementation 'androidx.test.espresso:espresso-core:3.4.0'
+}
+
+apply plugin: 'org.mozilla.rust-android-gradle.rust-android'
+
+cargo {
+    module  = "../jonect_android_rust"
+    libname = "jonect_android_rust"
+    targets = ["arm64", "x86"]
+    apiLevel = 21
+}
+
+tasks.whenTaskAdded { task ->
+    if ((task.name == 'javaPreCompileDebug' || task.name == 'javaPreCompileRelease')) {
+        task.dependsOn 'cargoBuild'
+    }
 }
