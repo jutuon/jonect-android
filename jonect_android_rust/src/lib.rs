@@ -11,20 +11,16 @@ pub mod stream_decoder;
 
 static QUIT_NOTIFICATION: AtomicBool = AtomicBool::new(false);
 
-static mut DECODER_STATE: Option<DecoderState> = None;
+static mut DECODING_THREAD_HANDLE: Option<JoinHandle<()>> = None;
 
-struct DecoderState {
-    handle: JoinHandle<()>,
-}
 
-impl DecoderState {
-    fn new(handle: JoinHandle<()>) -> Self {
-        Self {
-            handle,
-        }
-    }
-}
-
+/// Start Opus decoding thread. Warning: this code is not thread safe.
+///
+/// # Parameters
+/// * `env` - JNI requires this parameter.
+/// * `class` - JNI requires this parameter.
+/// * `address` - Jonect server IP address.
+/// * `port` - Jonect server TCP port number for audio data.
 #[no_mangle]
 pub extern "system" fn Java_com_example_jonect_OpusDecoder_startDecodingThread(
     env: JNIEnv,
@@ -32,11 +28,11 @@ pub extern "system" fn Java_com_example_jonect_OpusDecoder_startDecodingThread(
     address: JString,
     port: jint,
 ) {
-    let state = unsafe {
-        &mut DECODER_STATE
+    let thread_handle = unsafe {
+        &mut DECODING_THREAD_HANDLE
     };
 
-    if state.is_some() {
+    if thread_handle.is_some() {
         let message = "Decoder thread is already running.";
         stream_decoder::android_println(message);
         panic!("{}", message);
@@ -48,21 +44,26 @@ pub extern "system" fn Java_com_example_jonect_OpusDecoder_startDecodingThread(
         StreamDecoder::new(address, port).start();
     });
 
-    *state = Some(DecoderState::new(handle));
+    *thread_handle = Some(handle);
 
 }
 
+/// Quit Opus decoding thread. Warning: this code is not thread safe.
+///
+/// # Parameters
+/// * `env` - JNI requires this parameter.
+/// * `class` - JNI requires this parameter.
 #[no_mangle]
 pub extern "system" fn Java_com_example_jonect_OpusDecoder_quit(
     env: JNIEnv,
     class: JClass,
 ) {
-    let decoder = unsafe {
-        DECODER_STATE.take().unwrap()
+    let thread_handle = unsafe {
+        DECODING_THREAD_HANDLE.take().unwrap()
     };
 
     QUIT_NOTIFICATION.store(true, std::sync::atomic::Ordering::Relaxed);
-    match decoder.handle.join() {
+    match thread_handle.join() {
         Ok(()) => (),
         Err(_) => {
             stream_decoder::android_println("Decoder thread panicked.");

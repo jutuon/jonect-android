@@ -2,6 +2,7 @@ use std::{net::{TcpListener, ToSocketAddrs, TcpStream}, io::{Read, Write}, ffi::
 
 use audiopus::coder::Decoder;
 
+/// Print to Android Studio's log.
 pub fn android_println(text: &str) {
     let tag = CString::new("jonect_rust").unwrap();
     let text = CString::new(text).unwrap();
@@ -16,15 +17,24 @@ pub fn android_println(text: &str) {
 }
 
 
+/// Decode Jonect Opus stream and send resulting PCM data to Kotlin
+/// audio thread using local TCP connection.
 pub struct StreamDecoder {
     decoder: Decoder,
     decoder_input_buffer: Vec<u8>,
     decoder_output_buffer: Vec<i16>,
+    /// Jonect server IP address.
     address: String,
+    /// Jonect TCP port number for audio data.
     port: u16,
 }
 
 impl StreamDecoder {
+    /// Create new `StreamDecoder`.
+    ///
+    /// # Parameters
+    /// * `address` - Jonect server IP address.
+    /// * `port` - Jonect TCP port number for audio data.
     pub fn new(address: String, port: u16) -> Self {
         let decoder = Decoder::new(audiopus::SampleRate::Hz48000, audiopus::Channels::Stereo).unwrap();
 
@@ -38,19 +48,25 @@ impl StreamDecoder {
         }
     }
 
+    /// Start `StreamDecoder`. This method will block until quit notification is
+    /// received or error is detected.
     pub fn start(&mut self) {
         Self::config_thread_priority();
 
+        // Get connection to audio thread.
+
         let address = ("127.0.0.1", 12345).to_socket_addrs().unwrap().next().unwrap();
         let listener = TcpListener::bind(address).unwrap();
-        let (mut java_audio_thread_connection, _) = listener.accept().unwrap();
+        let (mut audio_thread_connection, _) = listener.accept().unwrap();
 
+
+        // Connect to Jonect server audio data port.
 
         let address = (self.address.as_str(), self.port).to_socket_addrs().unwrap().next().unwrap();
         let mut input_stream = match TcpStream::connect(address) {
             Ok(stream) => stream,
             Err(_) => {
-                java_audio_thread_connection.shutdown(std::net::Shutdown::Both).unwrap();
+                audio_thread_connection.shutdown(std::net::Shutdown::Both).unwrap();
                 return
             }
         };
@@ -62,7 +78,7 @@ impl StreamDecoder {
                 Ok(()) => (),
                 Err(_) => {
                     android_println("Packet byte count read error.");
-                    java_audio_thread_connection.shutdown(std::net::Shutdown::Both).unwrap();
+                    audio_thread_connection.shutdown(std::net::Shutdown::Both).unwrap();
                     return
                 }
             }
@@ -74,7 +90,7 @@ impl StreamDecoder {
                 Ok(()) => (),
                 Err(_) => {
                     android_println("Packet read error.");
-                    java_audio_thread_connection.shutdown(std::net::Shutdown::Both).unwrap();
+                    audio_thread_connection.shutdown(std::net::Shutdown::Both).unwrap();
                     return
                 }
             }
@@ -89,7 +105,7 @@ impl StreamDecoder {
 
             // Send PCM audio to Java audio thread.
             for sample in &self.decoder_output_buffer[0..(channel_sample_count*2)] {
-                match java_audio_thread_connection.write_all(&sample.to_le_bytes()) {
+                match audio_thread_connection.write_all(&sample.to_le_bytes()) {
                     Ok(_) => (),
                     Err(_) => {
                         android_println("PCM data send error.");
@@ -108,6 +124,7 @@ impl StreamDecoder {
 
     }
 
+    /// Set thread priority for current thread.
     fn config_thread_priority() {
         let result = unsafe {
             // Set thread priority for current thread. Currently on Linux

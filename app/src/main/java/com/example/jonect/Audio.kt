@@ -18,10 +18,21 @@ import java.util.concurrent.ArrayBlockingQueue
 import java.util.concurrent.BlockingQueue
 import java.util.concurrent.atomic.AtomicBoolean
 
+/**
+ * Marker type for messages which can be sent to the AudioThread.
+ */
 interface IAudioMessage
 
+/**
+ * Type for storing information about the audio stream which AudioThread will play.
+ *
+ * @param address IP address of the server.
+ */
 data class AudioStreamInfo(val address: String, val message: PlayAudioStream)
 
+/**
+ * Handle to AudioThread.
+ */
 class AudioThread: Thread {
     private val handle: LogicMessageHandle
     private val streamInfo: AudioStreamInfo
@@ -34,7 +45,9 @@ class AudioThread: Thread {
     private var requestQuitPipe: Pipe
     private var requestQuitSink: Pipe.SinkChannel
 
+    // Buffer for sending notifications. One byte represents one notification.
     private val notificationByte = ByteBuffer.allocate(1)
+
 
     constructor(handle: LogicMessageHandle, streamInfo: AudioStreamInfo): super() {
         this.handle = handle
@@ -47,6 +60,9 @@ class AudioThread: Thread {
         this.messageNotificationSink = this.messageNotificationPipe.sink()
     }
 
+    /**
+     * This code runs in a new thread.
+     */
     override fun run() {
         val audioPlayer = AudioPlayer(
             this.handle,
@@ -56,14 +72,19 @@ class AudioThread: Thread {
             this.requestQuitPipe.source(),
         )
         audioPlayer.start()
-        audioPlayer.closeSystemResources()
     }
 
+    /**
+     * Send quit request to AudioPlayer.
+     */
     private fun sendQuitRequest() {
         this.notificationByte.clear()
         this.requestQuitSink.write(this.notificationByte)
     }
 
+    /**
+     * Wait until AudioThread is closed.
+     */
     fun runQuit() {
         this.sendQuitRequest()
         this.join()
@@ -71,6 +92,9 @@ class AudioThread: Thread {
         this.messageNotificationSink.close()
     }
 
+    /**
+     * Send message to AudioThread
+     */
     fun sendAudioMessage(message: IAudioMessage) {
         this.audioMessages.put(message)
         this.notificationByte.clear()
@@ -78,6 +102,14 @@ class AudioThread: Thread {
     }
 }
 
+/**
+ * Component for playing audio. This component has two inbound communication "channels".
+ * The first is for messages (created with BlockingQueue and Pipe) and the second is for
+ * quit request notification (created with Pipe).
+ *
+ * Java's select system does not work with BlockingQueue so Pipe is used for notifications
+ * about new messages waiting in the BlockingQueue.
+ */
 class AudioPlayer(
     private val handle: LogicMessageHandle,
     private val streamInfo: AudioStreamInfo,
@@ -85,6 +117,7 @@ class AudioPlayer(
     private val messageNotifications: Pipe.SourceChannel,
     private val quitRequested: Pipe.SourceChannel,
 ) {
+    // Buffer for reading notifications. One notification is one byte.
     private val notificationBuffer = ByteBuffer.allocate(1)
     private var audioTrackPlaying = false
     private var underrunCount = 0
@@ -94,6 +127,8 @@ class AudioPlayer(
 
     fun start() {
         println("AudioPlayer: start")
+
+        // Set thread priority.
 
         try {
             Process.setThreadPriority(Process.THREAD_PRIORITY_AUDIO)
@@ -109,6 +144,8 @@ class AudioPlayer(
 
         val threadPriority = Process.getThreadPriority(Process.myTid());
         println("Current thread priority: $threadPriority")
+
+        // Setup audio playing and possible Opus decoding.
 
         val audioAttributes = AudioAttributes.Builder()
             .setContentType(AudioAttributes.CONTENT_TYPE_MUSIC)
@@ -164,11 +201,6 @@ class AudioPlayer(
 
         println("AudioTrack min buffer size is $minBufferSize")
 
-        // Buffer for reading the socket.
-        // Use buffer which matches current framesize: buffer size % (bytes per sample * channels) == 0
-        val socketBufferSize = 32
-        var currentAudioBuffer = ByteBuffer.allocate(socketBufferSize)
-
         val nativeSampleRate = AudioPlayer.getNativeSampleRate()
 
         println("AudioTrack native sample rate is $nativeSampleRate")
@@ -195,6 +227,8 @@ class AudioPlayer(
             )
         }
 
+        // Create the socket for reading PCM data.
+
         var address = this.streamInfo.address
         var port = this.streamInfo.message.port
 
@@ -213,6 +247,13 @@ class AudioPlayer(
             this.waitQuitRequest()
             return
         }
+
+        // Buffer for reading the PCM data socket.
+        // Use buffer which matches current framesize: buffer size % (bytes per sample * channels) == 0
+        val socketBufferSize = 32
+        var currentAudioBuffer = ByteBuffer.allocate(socketBufferSize)
+
+        // Configure Java's select system.
 
         this.messageNotifications.configureBlocking(false)
         this.quitRequested.configureBlocking(false)
@@ -255,7 +296,7 @@ class AudioPlayer(
 
             if (selector.selectedKeys().remove(messageNotificationKey)) {
                 this.tryReadMessage()?.also {
-
+                    // There is not currently any IAudioMessages implemented.
                 }
             }
 
@@ -266,6 +307,8 @@ class AudioPlayer(
             }
         }
 
+        // Close AudioPlayer.
+
         audioTrack.pause()
         audioTrack.release()
         selector.close()
@@ -275,21 +318,23 @@ class AudioPlayer(
             this.opusDecoder!!.quit()
         }
 
+        this.messageNotifications.close()
+        this.quitRequested.close()
+
         println("AudioPlayer: quit")
     }
 
     companion object {
+        /**
+         * Get native sample rate of AudioFormat.ENCODING_PCM_16BIT.
+         */
         fun getNativeSampleRate(): Int {
             return AudioTrack.getNativeOutputSampleRate(AudioFormat.ENCODING_PCM_16BIT)
         }
     }
 
-    fun closeSystemResources() {
-        this.messageNotifications.close()
-        this.quitRequested.close()
-    }
-
     private fun handleData(buffer: ByteBuffer, audioTrack: AudioTrack): Quit? {
+        // Make sure that buffer read position is at the beginning.
         buffer.rewind()
 
         val writeCount = buffer.remaining()
@@ -310,6 +355,8 @@ class AudioPlayer(
             return Quit()
         }
 
+        // Do some buffering before playing so there should be less buffer underruns
+        // when audio starts playing.
         if (this.initialBufferingCounter < 4) {
             this.initialBufferingCounter += 1
             return null
@@ -331,6 +378,9 @@ class AudioPlayer(
         return null
     }
 
+    /**
+     * Return true if quit request was received.
+     */
     private fun checkQuitRequest(): Boolean {
         this.notificationBuffer.clear()
         val result = this.quitRequested.read(this.notificationBuffer)
@@ -338,12 +388,17 @@ class AudioPlayer(
             // EOF
             throw Exception("AudioPlayer: unexpected EOF")
         } else if (result == 0) {
+            // There was no byte available in the socket.
             return false
         }
 
+        // One byte was received so quit is requested.
         return true
     }
 
+    /**
+     * Blocks until quit request is received.
+     */
     private fun waitQuitRequest() {
         while (true) {
             this.notificationBuffer.clear()
@@ -358,6 +413,9 @@ class AudioPlayer(
         }
     }
 
+    /**
+     * Try to read next IAudioMessage. If there is no message available then return null.
+     */
     private fun tryReadMessage(): IAudioMessage? {
         this.notificationBuffer.clear()
         val result = this.messageNotifications.read(this.notificationBuffer)
@@ -369,18 +427,36 @@ class AudioPlayer(
             return null
         }
 
+        // One byte was received so there is new message available.
         return this.messages.take()
     }
 }
 
+/**
+ * If this object is returned close AudioPlayer.
+ */
 class Quit
 
-// This class is not thread safe. Use this class only from one thread.
+
+/**
+ * Opus decoder library interface.
+ *
+ * This class is not thread safe. Use only single instance of this class
+ * and only from one thread.
+ */
 private class OpusDecoder {
     init {
         System.loadLibrary("jonect_android_rust")
     }
 
+    /**
+     * Start decoding thread.
+     *
+     * Thread opens local TCP port 12345.
+     *
+     * @param address Jonect server IP address.
+     * @param port Jonect server Opus audio data port.
+     */
     external fun startDecodingThread(address: String, port: Int)
     external fun quit()
 }

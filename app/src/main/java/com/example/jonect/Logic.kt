@@ -84,6 +84,9 @@ class LogicThread: Thread {
     }
 }
 
+/**
+ * Handle for sending messages to LogicThread.
+ */
 class LogicMessageHandle(private val messageHandler: Handler) {
     private fun sendMessage(messageData: Any) {
         var message = this.messageHandler.obtainMessage()
