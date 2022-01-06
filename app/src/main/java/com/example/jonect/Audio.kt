@@ -3,7 +3,6 @@ package com.example.jonect
 import android.media.*
 import android.os.Build
 import android.os.Process
-import android.provider.Settings
 import java.lang.Exception
 import java.net.ConnectException
 import java.net.InetSocketAddress
@@ -16,7 +15,6 @@ import java.nio.channels.SocketChannel
 import java.nio.channels.spi.SelectorProvider
 import java.util.concurrent.ArrayBlockingQueue
 import java.util.concurrent.BlockingQueue
-import java.util.concurrent.atomic.AtomicBoolean
 
 /**
  * Marker type for messages which can be sent to the AudioThread.
@@ -31,7 +29,7 @@ interface IAudioMessage
 data class AudioStreamInfo(val address: String, val message: PlayAudioStream)
 
 /**
- * Handle to AudioThread.
+ * Handle to AudioThread. Use start method to start the thread.
  */
 class AudioThread: Thread {
     private val handle: LogicMessageHandle

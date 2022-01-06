@@ -51,6 +51,9 @@ class IpAddressCheck(private val connectButton: Button): TextWatcher {
     override fun onTextChanged(p0: CharSequence?, p1: Int, p2: Int, p3: Int) {}
 }
 
+/**
+ * App's Activity.
+ */
 class MainActivity : AppCompatActivity() {
     private lateinit var address: EditText
     private lateinit var status: TextView

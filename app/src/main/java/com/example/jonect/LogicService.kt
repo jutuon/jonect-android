@@ -12,12 +12,18 @@ import android.os.IBinder
 import android.os.Looper
 
 
+/**
+ * Binder for LogicService. Used when Activity connects to the LogicService.
+ */
 class LogicServiceBinder(var logicService: LogicService): Binder() {
     fun getService(): LogicService {
         return this.logicService
     }
 }
 
+/**
+ * App's service object. This will run in a same thread as app's main Activity.
+ */
 class LogicService: Service() {
     private lateinit var serviceBinder: LogicServiceBinder
     private lateinit var logicThread: LogicThread
@@ -27,6 +33,9 @@ class LogicService: Service() {
     private var serverConnected = false
     private var serverConnectDisconnectRunning = false
 
+    /**
+     * Service's onCreate method. Check Android's documentation when this is called.
+     */
     override fun onCreate() {
         this.serviceBinder = LogicServiceBinder(this)
         this.logicThread = LogicThread(ServiceHandle(this))
@@ -40,42 +49,72 @@ class LogicService: Service() {
         println("Service: created")
     }
 
+    /**
+     * Service's onStartCommand method. Check Android's documentation for more information about this method.
+     */
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         return START_NOT_STICKY
     }
 
+    /**
+     * Service's onBind method. Check Android's documentation for more information about this method.
+     */
     override fun onBind(p0: Intent?): IBinder? {
         return this.serviceBinder
     }
 
+    /**
+     * Service's onDestroy method. Check Android's documentation for more information about this method.
+     */
     override fun onDestroy() {
         this.logicThread.sendQuitRequest()
         this.logicThread.join()
         println("Service: quit ready")
     }
 
+    /**
+     * Get current status text of LogicService.
+     */
     fun getStatus(): String {
         return this.status
     }
 
+    /**
+     * If true is returned then server is connected.
+     * If false is returned then server is not connected.
+     */
     fun getServerConnected(): Boolean {
         return this.serverConnected
     }
 
+    /**
+     * If true is returned then connecting to the server or disconnecting from it is currently ongoing.
+     */
     fun getServerConnectDisconnectRunning(): Boolean {
         return this.serverConnectDisconnectRunning
     }
 
+    /**
+     * Connect to the server.
+     *
+     * @param address Server IP address.
+     */
     fun sendConnectMessage(address: String)  {
         this.logicThread.sendConnectMessage(address)
         this.serverConnectDisconnectRunning = true
     }
 
+    /**
+     * Disconnect from the server.
+     */
     fun sendDisconnectMessage() {
         this.logicThread.sendDisconnectMessage()
         this.serverConnectDisconnectRunning = true
     }
 
+    /**
+     * Set logic status information.
+     */
     fun setStatus(statusEvent: ILogicStatusEvent) {
         when (statusEvent) {
             is ConnectedEvent -> {
@@ -126,7 +165,14 @@ class LogicService: Service() {
     }
 }
 
+/**
+ * Handle to Android service object. Sends events to service object thread which
+ * is app's main thread.
+ */
 class ServiceHandle(private val service: LogicService) {
+    /**
+     * Update status text which is displayed in the UI.
+     */
     fun updateStatus(statusEvent: ILogicStatusEvent) {
         Handler(Looper.getMainLooper()).post {
             this.service.setStatus(statusEvent)

@@ -8,50 +8,85 @@ import android.os.Handler
 import android.os.Looper
 import android.os.Message
 
+/**
+ * Event from LogicService to Logic. Start connecting to the server.
+ *
+ * @param address Server IP address.
+ */
 data class ConnectEvent(val address: String)
+
+/**
+ * Event from LogicService to Logic. Logic quit request.
+ */
 class QuitRequestEvent
+
+/**
+ * Event from LogicService to Logic. Disconnect from the server.
+ */
 class DisconnectEvent
+
+
+/**
+ * Event from Connection to Logic. Server is now connected.
+ */
 class ConnectedEvent: ILogicStatusEvent {
     override fun toString(): String {
         return "Connected"
     }
 }
+
+/**
+ * Event from Connection to Logic. Server is now disconnected.
+ */
 class DisconnectedEvent: ILogicStatusEvent {
     override fun toString(): String {
         return "Disconnected"
     }
 }
+
+/**
+ * Event from Connection to Logic. There was some connection error.
+ */
 class ConnectionError: ILogicStatusEvent {
     override fun toString(): String {
         return "Connection error"
     }
 }
-class ConnectionMessage(val message: ProtocolMessage): ILogicStatusEvent {
+
+/**
+ * Event from Connection to Logic. Server sent JSON message.
+ */
+class ConnectionMessage(val message: ProtocolMessage) {
     override fun toString(): String {
         return "Connection message: $message"
     }
 }
 
+/**
+ * Event from AudioPlayer to Logic. There was some audio stream error.
+ */
 class AudioStreamError(private val message: String): ILogicStatusEvent {
     override fun toString(): String {
         return "AudioStreamError: $message"
     }
 }
 
+/**
+ * Marker for events which are used for updating LogicService's logic status information.
+ */
 interface ILogicStatusEvent
 
-class LogicThread: Thread {
-    private val serviceHandle: ServiceHandle
+/**
+ * Handle for thread which manages app's logic.
+ */
+class LogicThread(private val serviceHandle: ServiceHandle) : Thread() {
     private lateinit var messageHandler: Handler
     private lateinit var logic: Logic
 
-    constructor(serviceHandle: ServiceHandle): super() {
-        this.serviceHandle = serviceHandle
-    }
-
+    /**
+     * This code runs in a new thread.
+     */
     override fun run() {
-        // This code runs in a new thread.
-
         Looper.prepare()
         this.logic = Logic(this.serviceHandle)
 
@@ -65,20 +100,34 @@ class LogicThread: Thread {
         Looper.loop()
     }
 
+    /**
+     * Send some type to the Logic.
+     */
     private fun sendMessage(messageData: Any) {
-        var message = this.messageHandler.obtainMessage()
+        val message = this.messageHandler.obtainMessage()
         message.obj = messageData
         this.messageHandler.sendMessage(message)
     }
 
+    /**
+     * Send ConnectEvent to the Logic.
+     *
+     * @param address Server IP address.
+     */
     fun sendConnectMessage(address: String) {
         this.sendMessage(ConnectEvent(address))
     }
 
+    /**
+     * Send QuitRequestEvent to the Logic.
+     */
     fun sendQuitRequest() {
         this.sendMessage(QuitRequestEvent())
     }
 
+    /**
+     * Send DisconnectEvent to the Logic.
+     */
     fun sendDisconnectMessage() {
         this.sendMessage(DisconnectEvent())
     }
@@ -88,31 +137,52 @@ class LogicThread: Thread {
  * Handle for sending messages to LogicThread.
  */
 class LogicMessageHandle(private val messageHandler: Handler) {
+    /**
+     * Send some object to LogicThread.
+     */
     private fun sendMessage(messageData: Any) {
-        var message = this.messageHandler.obtainMessage()
+        val message = this.messageHandler.obtainMessage()
         message.obj = messageData
         this.messageHandler.sendMessage(message)
     }
 
+    /**
+     * Send ConnectedEvent to LogicThread.
+     */
     fun sendConnectedNotification() {
         this.sendMessage(ConnectedEvent())
     }
 
+    /**
+     * Send ConnectionError to LogicThread.
+     */
     fun sendConnectionError() {
         this.sendMessage(ConnectionError())
     }
 
+    /**
+     * Send ProtocolMessage to LogicThread.
+     */
     fun sendConnectionMessage(message: ProtocolMessage) {
         this.sendMessage(ConnectionMessage(message))
     }
 
+    /**
+     * Send AudioStreamError to LogicThread.
+     *
+     * @param error Error message.
+     */
     fun sendAudioStreamError(error: String) {
         this.sendMessage(AudioStreamError(error))
     }
 }
 
 
-class Logic(val serviceHandle: ServiceHandle) {
+/**
+ * Component which handles server connections. Call initLogicMessageHandle after
+ * creating Logic component.
+ */
+class Logic(private val serviceHandle: ServiceHandle) {
     private lateinit var logicMessageHandle: LogicMessageHandle
 
 
@@ -120,19 +190,26 @@ class Logic(val serviceHandle: ServiceHandle) {
     private var audio: AudioThread? = null
     private var connectionAddress: String? = null
 
+    /**
+     * Init handle for sending messages to the logic thread. Call this after creating
+     * Logic component.
+     */
     fun initLogicMessageHandle(handle: LogicMessageHandle) {
         this.logicMessageHandle = handle
     }
 
+    /**
+     * Handle messages which other components send to the Logic component.
+     *
+     * Returning false will continue message handling. Returning true will stop message handling.
+     */
     fun handleMessage(m: Message): Boolean {
         if (m.obj == null) {
             // Continue message handling.
             return false
         }
 
-        var event = m.obj
-
-        when (event) {
+        when (val event = m.obj) {
             is ConnectEvent -> {
                 println(event.address)
 
@@ -198,6 +275,9 @@ class Logic(val serviceHandle: ServiceHandle) {
         return false
     }
 
+    /**
+     * Handle JSON message from the server.
+     */
     private fun handleProtocolMessage(message: ProtocolMessage) {
         when (message) {
             is ServerInfo -> {
@@ -222,7 +302,10 @@ class Logic(val serviceHandle: ServiceHandle) {
         }
     }
 
-    fun updateServiceStatus(statusEvent: ILogicStatusEvent) {
+    /**
+     * Update LogicService's status text which will be displayed in the app UI.
+     */
+    private fun updateServiceStatus(statusEvent: ILogicStatusEvent) {
         this.serviceHandle.updateStatus(statusEvent)
     }
 

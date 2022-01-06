@@ -20,6 +20,11 @@ import java.nio.channels.spi.SelectorProvider
 import java.util.concurrent.ArrayBlockingQueue
 import java.util.concurrent.BlockingQueue
 
+/**
+ * Handle to ConnectionThread. Use start method to start the thread.
+ *
+ * This thread will do JSON messaging to the server.
+ */
 class ConnectionThread: Thread {
     private val handle: LogicMessageHandle
     private val address: String
@@ -32,8 +37,14 @@ class ConnectionThread: Thread {
     private var requestQuitPipe: Pipe
     private var requestQuitSink: Pipe.SinkChannel
 
+    // One notification is one byte.
     private val notificationByte = ByteBuffer.allocate(1)
 
+    /**
+     * Create ConnectionThread.
+     *
+     * @param address Jonect server IP address.
+     */
     constructor(handle: LogicMessageHandle, address: String): super() {
         this.handle = handle
         this.address = address
@@ -45,6 +56,9 @@ class ConnectionThread: Thread {
         this.messageNotificationSink = this.messageNotificationPipe.sink()
     }
 
+    /**
+     * This code runs in a new thread.
+     */
     override fun run() {
         val connection = Connection(
             this.handle,
@@ -54,14 +68,19 @@ class ConnectionThread: Thread {
             this.requestQuitPipe.source(),
         )
         connection.start()
-        connection.closeSystemResources()
     }
 
+    /**
+     * Send quit message to the thread.
+     */
     private fun sendQuitRequest() {
         this.notificationByte.clear()
         this.requestQuitSink.write(this.notificationByte)
     }
 
+    /**
+     * Close ConnectionThread. This method will block.
+     */
     fun runQuit() {
         this.sendQuitRequest()
         this.join()
@@ -76,8 +95,20 @@ class ConnectionThread: Thread {
     }
 }
 
+/**
+ * If this object is returned then disable socket writing notifications which select method would
+ * return.
+ */
 private class DisableWriting
 
+/**
+ * Component for reading and writing Jonect JSON messages from TCP socket.
+ *
+ * Logic component will send messages to this component using two "channels". The first channel
+ * is implemented with BlockingQueue and Pipe (Java's select system does not support
+ * BlockingQueue as event source). The second channel is implemented with Pipe and is used
+ * only for quit request notification.
+ */
 class Connection(
         private val handle: LogicMessageHandle,
         private val address: String,
@@ -86,12 +117,17 @@ class Connection(
         private val quitRequested: Pipe.SourceChannel,
 ) {
 
+    // One notification is one byte.
     private val notificationBuffer = ByteBuffer.allocate(1)
     private val socketReader = SocketReader()
+
+    // This is initialized only when
     private lateinit var socketWriter: SocketWriter
 
     fun start() {
         println("Connection: start")
+
+        // Connect to server JSON data port.
 
         val inetAddress = InetSocketAddress(this.address, 8080)
         val socket: SocketChannel = try {
@@ -105,6 +141,8 @@ class Connection(
 
         this.handle.sendConnectedNotification()
 
+        // Configure Selector.
+
         this.messageNotifications.configureBlocking(false)
         this.quitRequested.configureBlocking(false)
         socket.configureBlocking(false)
@@ -112,6 +150,8 @@ class Connection(
         val selector = Selector.open()
         val messageNotificationKey = this.messageNotifications.register(selector, SelectionKey.OP_READ)
         val quitRequestedKey = this.quitRequested.register(selector, SelectionKey.OP_READ)
+
+        // There is not yet messages to send to the server so only register read events.
         val socketKey = socket.register(selector, SelectionKey.OP_READ)
 
         while (true) {
@@ -123,6 +163,7 @@ class Connection(
 
             if (selector.selectedKeys().remove(socketKey)) {
                 if (socketKey.isReadable) {
+                    // Handle socket reading.
                     try {
                         this.socketReader.handleSocketRead(socket)?.also {
                             this.parseAndSendMessage(it)
@@ -134,7 +175,14 @@ class Connection(
                 }
 
                 if (socketKey.isWritable) {
+                    /*
+                    Handle socket writing. This code only runs when there is something
+                    to write to the socket.
+                     */
+
                     if (this.socketWriter.handleSocketWrite(socket) is DisableWriting) {
+                        // JSON message is writing is complete.
+
                         // Disable socket writing.
                         socketKey.interestOps(SelectionKey.OP_READ)
                         // Enable message reading.
@@ -144,6 +192,11 @@ class Connection(
             }
 
             if (selector.selectedKeys().remove(messageNotificationKey)) {
+                /*
+                Logic sent new message for processing. This code runs only when there is no
+                message writing happening currently.
+                */
+
                 this.tryReadMessage()?.also {
                     this.socketWriter = SocketWriter(it)
                     // Enable socket writing.
@@ -160,11 +213,20 @@ class Connection(
             }
         }
 
+        // Quit connection.
+
         selector.close()
         socket.close()
+
+        this.messageNotifications.close()
+        this.quitRequested.close()
+
         println("Connection: quit")
     }
 
+    /**
+     * Return true if quit is requested.
+     */
     private fun checkQuitRequest(): Boolean {
         this.notificationBuffer.clear()
         val result = this.quitRequested.read(this.notificationBuffer)
@@ -175,9 +237,13 @@ class Connection(
             return false
         }
 
+        // One byte received so quit is requested.
         return true
     }
 
+    /**
+     * Block until quit is requested.
+     */
     private fun waitQuitRequest() {
         while (true) {
             this.notificationBuffer.clear()
@@ -192,6 +258,10 @@ class Connection(
         }
     }
 
+    /**
+     * Read message from Logic. This message will be sent to the server.
+     * Returns null if there was no message available.
+     */
     private fun tryReadMessage(): String? {
         this.notificationBuffer.clear()
         val result = this.messageNotifications.read(this.notificationBuffer)
@@ -206,6 +276,9 @@ class Connection(
         return Json.encodeToString(this.messages.take())
     }
 
+    /**
+     * Parse and send message from the server to the Logic.
+     */
     private fun parseAndSendMessage(message: String) {
         try {
             val protocolMessage = Json.decodeFromString<ProtocolMessage>(message)
@@ -214,26 +287,38 @@ class Connection(
             println("Unknown message: $message")
         }
     }
-
-    fun closeSystemResources() {
-        this.messageNotifications.close()
-        this.quitRequested.close()
-    }
 }
 
+/**
+ * Server disconnected.
+ */
 class ConnectionQuitException: Exception()
 
+/**
+ * Server socket reading state.
+ */
 enum class ReadMode {
     MESSAGE_LENGTH,
     MESSAGE,
 }
 
+/**
+ * Socket reading logic.
+ */
 private class SocketReader {
     var readMode: ReadMode = ReadMode.MESSAGE_LENGTH
     val messageLengthBytes: ByteBuffer = ByteBuffer.allocate(4)
     lateinit var messageBytes: ByteBuffer
 
+    /**
+     * Read JSON message from the socket. Handles socket reading events.
+     *
+     * Returns JSON message as String if message transfer is complete.
+     *
+     * Throws ConnectionQuitException if the server disconnects.
+     */
     fun handleSocketRead(socket: SocketChannel): String? {
+        // Change reading buffer depending on the current reading mode.
         val bytes = when (this.readMode) {
             ReadMode.MESSAGE_LENGTH -> {
                 this.messageLengthBytes
@@ -244,14 +329,21 @@ private class SocketReader {
         }
 
         while (true) {
+            // Non blocking socket mode should be enabled.
+
+            // TODO: Handle IOException?
             val readCount = socket.read(bytes)
             if (readCount == -1) {
-                // EOF
+                // EOF, server disconnected.
                 throw ConnectionQuitException()
             } else if (readCount == 0) {
+                // Received zero bytes from the socket.
+
                 if (bytes.hasRemaining()) {
+                    // Message length or message transfer is not complete. Continue next time.
                     return null
                 } else {
+                    // Message length or message transfer is complete.
                     break
                 }
             }
@@ -274,9 +366,17 @@ private class SocketReader {
     }
 }
 
+/**
+ * Socket writing logic.
+ */
 private class SocketWriter {
     val bytes: ByteBuffer
 
+    /**
+     * Create new writer for writing one JSON message.
+     *
+     * @param message JSON message as String.
+     */
     constructor(message: String) {
         val messageByteArray = message.encodeToByteArray()
         // TODO: Check integer overflow.
@@ -286,14 +386,22 @@ private class SocketWriter {
         this.bytes.rewind()
     }
 
+    /**
+     * Handle socket write event.
+     */
     fun handleSocketWrite(socket: SocketChannel): DisableWriting? {
         while (true) {
+            // Socket should be in non blocking mode.
+
+            // TODO: Handle IOException?
             val writeCount = socket.write(this.bytes)
 
             if (writeCount == 0) {
                 return if (this.bytes.hasRemaining()) {
+                    // Message writing is not complete. Continue next time.
                     null
                 } else {
+                    // Message writing is complete. Disable socket writing events.
                     DisableWriting()
                 }
             }
