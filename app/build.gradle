@@ -55,7 +55,7 @@ apply plugin: 'org.mozilla.rust-android-gradle.rust-android'
 cargo {
     module  = "../jonect_android_rust"
     libname = "jonect_android_rust"
-    targets = ["arm64", "x86"]
+    targets = ["arm", "arm64", "x86", "x86_64"]
     apiLevel = 21
 }
 
