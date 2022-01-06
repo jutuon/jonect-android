@@ -24,11 +24,13 @@ import java.util.concurrent.BlockingQueue
  * Handle to ConnectionThread. Use start method to start the thread.
  *
  * This thread will do JSON messaging to the server.
+ *
+ *  @param address Jonect server IP address.
  */
-class ConnectionThread: Thread {
-    private val handle: LogicMessageHandle
-    private val address: String
-
+class ConnectionThread(
+    private val handle: LogicMessageHandle,
+    private val address: String,
+) : Thread() {
     private val connectionMessages: BlockingQueue<ProtocolMessage> =
         ArrayBlockingQueue(32)
     private var messageNotificationPipe: Pipe
@@ -40,15 +42,7 @@ class ConnectionThread: Thread {
     // One notification is one byte.
     private val notificationByte = ByteBuffer.allocate(1)
 
-    /**
-     * Create ConnectionThread.
-     *
-     * @param address Jonect server IP address.
-     */
-    constructor(handle: LogicMessageHandle, address: String): super() {
-        this.handle = handle
-        this.address = address
-
+    init {
         this.requestQuitPipe = SelectorProvider.provider().openPipe()
         this.requestQuitSink = this.requestQuitPipe.sink()
 

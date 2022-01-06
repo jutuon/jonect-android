@@ -15,7 +15,7 @@ import android.os.Looper
 /**
  * Binder for LogicService. Used when Activity connects to the LogicService.
  */
-class LogicServiceBinder(var logicService: LogicService): Binder() {
+class LogicServiceBinder(private var logicService: LogicService): Binder() {
     fun getService(): LogicService {
         return this.logicService
     }
@@ -59,7 +59,7 @@ class LogicService: Service() {
     /**
      * Service's onBind method. Check Android's documentation for more information about this method.
      */
-    override fun onBind(p0: Intent?): IBinder? {
+    override fun onBind(p0: Intent?): IBinder {
         return this.serviceBinder
     }
 

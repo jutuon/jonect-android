@@ -31,9 +31,10 @@ data class AudioStreamInfo(val address: String, val message: PlayAudioStream)
 /**
  * Handle to AudioThread. Use start method to start the thread.
  */
-class AudioThread: Thread {
-    private val handle: LogicMessageHandle
-    private val streamInfo: AudioStreamInfo
+class AudioThread(
+    private val handle: LogicMessageHandle,
+    private val streamInfo: AudioStreamInfo,
+) : Thread() {
 
     private val audioMessages: BlockingQueue<IAudioMessage> =
         ArrayBlockingQueue(32)
@@ -47,10 +48,7 @@ class AudioThread: Thread {
     private val notificationByte = ByteBuffer.allocate(1)
 
 
-    constructor(handle: LogicMessageHandle, streamInfo: AudioStreamInfo): super() {
-        this.handle = handle
-        this.streamInfo = streamInfo
-
+    init {
         this.requestQuitPipe = SelectorProvider.provider().openPipe()
         this.requestQuitSink = this.requestQuitPipe.sink()
 
@@ -140,7 +138,7 @@ class AudioPlayer(
             println("Setting thread priority failed: $error")
         }
 
-        val threadPriority = Process.getThreadPriority(Process.myTid());
+        val threadPriority = Process.getThreadPriority(Process.myTid())
         println("Current thread priority: $threadPriority")
 
         // Setup audio playing and possible Opus decoding.
@@ -203,8 +201,8 @@ class AudioPlayer(
 
         println("AudioTrack native sample rate is $nativeSampleRate")
 
-        var audioTrack = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            var builder = AudioTrack.Builder()
+        val audioTrack = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            val builder = AudioTrack.Builder()
                 .setAudioAttributes(audioAttributes)
                 .setAudioFormat(audioFormat.build())
                 .setTransferMode(AudioTrack.MODE_STREAM)
@@ -249,7 +247,7 @@ class AudioPlayer(
         // Buffer for reading the PCM data socket.
         // Use buffer which matches current framesize: buffer size % (bytes per sample * channels) == 0
         val socketBufferSize = 32
-        var currentAudioBuffer = ByteBuffer.allocate(socketBufferSize)
+        val currentAudioBuffer = ByteBuffer.allocate(socketBufferSize)
 
         // Configure Java's select system.
 
@@ -272,12 +270,12 @@ class AudioPlayer(
             if (selector.selectedKeys().remove(socketKey)) {
                 if (socketKey.isReadable) {
                     // PCM audio stream
-                    val result = socket.read(currentAudioBuffer)
+                    val socketResult = socket.read(currentAudioBuffer)
 
-                    if (result == -1) {
+                    if (socketResult == -1) {
                         this.handle.sendAudioStreamError("Audio stream EOF")
                         break
-                    } else if (result != 0) {
+                    } else if (socketResult != 0) {
                         if (!currentAudioBuffer.hasRemaining()) {
 
                             // When buffer is full of data write it to AudioTrack.
