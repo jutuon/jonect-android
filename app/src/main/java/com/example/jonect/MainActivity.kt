@@ -18,6 +18,9 @@ import android.widget.CheckBox
 import android.widget.EditText
 import android.widget.TextView
 
+/**
+ * Handle service connection events.
+ */
 class ServiceConnectionHandler(private val activity: MainActivity): ServiceConnection {
     override fun onServiceConnected(p0: ComponentName?, serviceBinder: IBinder?) {
         this.activity.service = (serviceBinder as LogicServiceBinder).getService()
@@ -37,6 +40,9 @@ class ServiceConnectionHandler(private val activity: MainActivity): ServiceConne
     }
 }
 
+/**
+ * Class that will check IP address in EditText widget.
+ */
 class IpAddressCheck(private val connectButton: Button): TextWatcher {
     override fun afterTextChanged(text: Editable?) {
         if (text == null) {
@@ -53,6 +59,8 @@ class IpAddressCheck(private val connectButton: Button): TextWatcher {
 
 /**
  * App's Activity.
+ *
+ * Previously used IP address and automatic connecting setting is stored to SharedPreferences.
  */
 class MainActivity : AppCompatActivity() {
     private lateinit var address: EditText
@@ -61,6 +69,10 @@ class MainActivity : AppCompatActivity() {
     private lateinit var connectAutomaticallyCheckBox: CheckBox
 
     private var preferenceAddress: String? = null
+
+    /**
+     * If true then connect automatically to the server when the LogicService connects.
+     */
     private var connectAutomatically = false
 
     var service: LogicService? = null
@@ -77,18 +89,9 @@ class MainActivity : AppCompatActivity() {
             this.handleConnectButtonOnClick()
         }
 
-        val sharedPreferences = this.getPreferences(Context.MODE_PRIVATE)
-
-        this.connectAutomaticallyCheckBox = this.findViewById(R.id.checkbox_connect_automatically)
-        this.connectAutomaticallyCheckBox.isChecked = sharedPreferences.getBoolean(CONNECT_AUTOMATICALLY_KEY, false)
-        this.connectAutomaticallyCheckBox.setOnClickListener {
-            sharedPreferences
-                .edit()
-                .putBoolean(CONNECT_AUTOMATICALLY_KEY, this.connectAutomaticallyCheckBox.isChecked)
-                .apply()
-        }
-
         this.address = this.findViewById(R.id.edit_text_server_address)
+        this.address.addTextChangedListener(IpAddressCheck(this.connectButton))
+
         this.status = this.findViewById(R.id.text_view_status)
 
         // Update status text before binding service to
@@ -99,6 +102,19 @@ class MainActivity : AppCompatActivity() {
             bundle.getString(STATE_TEXT)?.also {
                 this.status.text = it
             }
+        }
+
+        // Setup automatic connecting and restore previously used IP address if there is one.
+
+        val sharedPreferences = this.getPreferences(Context.MODE_PRIVATE)
+
+        this.connectAutomaticallyCheckBox = this.findViewById(R.id.checkbox_connect_automatically)
+        this.connectAutomaticallyCheckBox.isChecked = sharedPreferences.getBoolean(CONNECT_AUTOMATICALLY_KEY, false)
+        this.connectAutomaticallyCheckBox.setOnClickListener {
+            sharedPreferences
+                .edit()
+                .putBoolean(CONNECT_AUTOMATICALLY_KEY, this.connectAutomaticallyCheckBox.isChecked)
+                .apply()
         }
 
         val previousAddress = sharedPreferences.getString(ADDRESS_KEY, null)
@@ -113,7 +129,7 @@ class MainActivity : AppCompatActivity() {
             }
         }
 
-        this.address.addTextChangedListener(IpAddressCheck(this.connectButton))
+        // Connect to LogicService
 
         val intent = Intent(this, LogicService::class.java)
         this.startService(intent)
@@ -124,6 +140,10 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    /**
+     * Run this code when LogicService connects to the MainActivity. App will connect to
+     * the server if automatic connection is requested.
+     */
     fun handleServiceConnect() {
         this.service?.also {
             this.status.text = it.getStatus()
@@ -138,6 +158,11 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    /**
+     * LogicService will run this method when server connection state changes.
+     *
+     * @param serverConnected True when server is connected.
+     */
     fun serviceServerConnectedUpdate(serverConnected: Boolean) {
         if (serverConnected) {
             this.connectButton.text = "Disconnect"
@@ -148,11 +173,17 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    /**
+     * LogicService will run this method when it's status text is updated.
+     */
     fun serviceStatusUpdate(newStatus: String) {
         this.status.text = newStatus
         println("Status update: $newStatus")
     }
 
+    /**
+     * Handler for connect button.
+     */
     private fun handleConnectButtonOnClick() {
         this.service?.also {
             if (it.getServerConnectDisconnectRunning()) {
@@ -171,6 +202,10 @@ class MainActivity : AppCompatActivity() {
     override fun onDestroy() {
         super.onDestroy()
 
+        /*
+        Only run quit code when activity is not going to be recreated because of configuration
+        change like device rotation.
+         */
         if (this.isFinishing) {
             this.quitStarted = true
             val intent = Intent(this, LogicService::class.java)
@@ -189,6 +224,9 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    /**
+     * Save state text so it can be restored in onCreate method.
+     */
     override fun onSaveInstanceState(outState: Bundle) {
         outState.putString(STATE_TEXT, this.status.text.toString())
 
@@ -196,8 +234,19 @@ class MainActivity : AppCompatActivity() {
     }
 
     companion object {
+        /**
+         * Key for storing state text to the Bundle.
+         */
         const val STATE_TEXT = "status"
+
+        /**
+         * Key for storing IP address to the SharedPreferences.
+         */
         const val ADDRESS_KEY = "address"
+
+        /**
+         * Key for storing automatic connecting setting to the SharedPreferences.
+         */
         const val CONNECT_AUTOMATICALLY_KEY = "connect_automatically"
     }
 
