@@ -14,18 +14,25 @@ Opus audio stream it is enabled only if native sample rate is 48000 Hz.
 
 ## Building and running on Ubuntu 20.04
 
-1. Install Rust and Android Studio.
+1. Install Rust, Android Studio and package `python-is-python3`.
+
+   <https://www.rust-lang.org/>
+
+   <https://developer.android.com/studio>
 
 2. Install Rust toolchains for Android.
 
-```
-rustup target add armv7-linux-androideabi
-rustup target add i686-linux-android
-rustup target add aarch64-linux-android
-rustup target add x86_64-linux-android
-```
+   ```
+   rustup target add armv7-linux-androideabi
+   rustup target add i686-linux-android
+   rustup target add aarch64-linux-android
+   rustup target add x86_64-linux-android
+   ```
 
-3. Start Android Studio with CMAKE environment variable set to the previously
+3. Install NDK version 21.4.7075529 and cmake 3.18.1 from Android Studio's
+   Android SDK manager.
+
+4. Start Android Studio with CMAKE environment variable set to the previously
    installed cmake binary.
 
     For example you can use the following commands to do that if Android Studio
@@ -36,9 +43,6 @@ rustup target add x86_64-linux-android
     cd ~/android-studio/bin
     ./studio.sh
     ```
-
-4. Install NDK version 21.4.7075529 and cmake 3.18.1 from Android Studio's
-   Android SDK manager.
 
 5. Build and run the app from the Android Studio.
 
