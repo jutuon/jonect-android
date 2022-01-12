@@ -69,6 +69,28 @@ Android device.
 
 3. Press connect button.
 
+### Using USB connection
+
+USB connection to the server requires that ADB (Android Debug Bridge) is
+enabled from Android device's settings.
+
+1. Install `adb` command. For example it is included with Android SDK.
+
+2. Start the server.
+
+3. Connect Android device to the computer and run adb commands. If using adb
+   from Android SDK installed to default location run the following commands
+   which opens server ports to the Android device.
+
+   ```
+   cd "$HOME/Android/Sdk/platform-tools"
+   ./adb reverse tcp:8080 tcp:8080
+   ./adb reverse tcp:8082 tcp:8082
+   ```
+
+4. Write localhost address `127.0.0.1` to the app's IP address field. Press
+   connect button.
+
 ## Known issues
 
 * Audio underruns especiously when the audio streaming begins.
