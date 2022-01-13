@@ -57,6 +57,7 @@ cargo {
     libname = "jonect_android_rust"
     targets = ["arm", "arm64", "x86", "x86_64"]
     apiLevel = 21
+    profile = "release"
 }
 
 tasks.whenTaskAdded { task ->
