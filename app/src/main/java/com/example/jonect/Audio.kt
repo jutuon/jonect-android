@@ -16,6 +16,8 @@ import java.nio.channels.spi.SelectorProvider
 import java.util.concurrent.ArrayBlockingQueue
 import java.util.concurrent.BlockingQueue
 
+/*
+
 /**
  * Marker type for messages which can be sent to the AudioThread.
  */
@@ -433,26 +435,4 @@ class AudioPlayer(
  */
 class Quit
 
-
-/**
- * Opus decoder library interface.
- *
- * This class is not thread safe. Use only single instance of this class
- * and only from one thread.
- */
-private class OpusDecoder {
-    init {
-        System.loadLibrary("jonect_android_rust")
-    }
-
-    /**
-     * Start decoding thread.
-     *
-     * Thread opens local TCP port 12345.
-     *
-     * @param address Jonect server IP address.
-     * @param port Jonect server Opus audio data port.
-     */
-    external fun startDecodingThread(address: String, port: Int)
-    external fun quit()
-}
+*/

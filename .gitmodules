@@ -1,0 +1,3 @@
+[submodule "jonect_android_rust/libjonect"]
+	path = jonect_android_rust/libjonect
+	url = https://github.com/jutuon/libjonect

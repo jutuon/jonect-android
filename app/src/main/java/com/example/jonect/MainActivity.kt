@@ -207,6 +207,8 @@ class MainActivity : AppCompatActivity() {
         change like device rotation.
          */
         if (this.isFinishing) {
+            println("Main activity quit started")
+
             this.quitStarted = true
             val intent = Intent(this, LogicService::class.java)
             this.service?.also {

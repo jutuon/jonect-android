@@ -8,55 +8,52 @@ import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 
 /**
- * Marker type for protocol JSON messages.
+ * Marker type for UI JSON messages.
  */
 @Serializable
 sealed class ProtocolMessage
 
-/**
- * Server sends this message when client connects to it.
- */
 @Serializable
-@SerialName("ServerInfo")
-data class ServerInfo(
-        val version: String,
-        val id: String,
-        ): ProtocolMessage()
+@SerialName("AndroidGetNativeSampleRate")
+object AndroidGetNativeSampleRate: ProtocolMessage()
 
-/**
- * When this is received then response with PingResponse message.
- * When this is sent then server should response with PingResponse.
- */
 @Serializable
-@SerialName("Ping")
-object Ping: ProtocolMessage()
-
-/**
- * Response message to Ping message.
- */
-@Serializable
-@SerialName("PingResponse")
-object PingResponse: ProtocolMessage()
-
-/**
- * Server sends this message when it request that client should play an audio stream.
- */
-@Serializable
-@SerialName("PlayAudioStream")
-data class PlayAudioStream(
-        val format: String,
-        val channels: Short,
-        val rate: Int,
-        val port: Int,
-): ProtocolMessage()
-
-/**
- * Client should send this when TCP connection to the server is established.
- */
-@Serializable
-@SerialName("ClientInfo")
-data class ClientInfo(
-        val version: String,
-        val id: String,
+@SerialName("AndroidNativeSampleRate")
+data class AndroidNativeSampleRate(
         val native_sample_rate: Int,
 ): ProtocolMessage()
+
+@Serializable
+@SerialName("ConnectTo")
+data class ConnectTo(
+        val ip_address: String,
+): ProtocolMessage()
+
+@Serializable
+@SerialName("DeviceConnectionEstablished")
+object DeviceConnectionEstablished: ProtocolMessage(), ILogicStatusEvent {
+        override fun toString(): String {
+                return "Connected"
+        }
+}
+
+@Serializable
+@SerialName("DeviceConnectionDisconnected")
+object DeviceConnectionDisconnected: ProtocolMessage(), ILogicStatusEvent {
+        override fun toString(): String {
+                return "Disconnected"
+        }
+}
+
+@Serializable
+@SerialName("DeviceConnectionDisconnectedWithError")
+object DeviceConnectionDisconnectedWithError: ProtocolMessage(), ILogicStatusEvent {
+        override fun toString(): String {
+                return "Connection error"
+        }
+}
+
+
+@Serializable
+@SerialName("DisconnectDevice")
+object DisconnectDevice: ProtocolMessage()

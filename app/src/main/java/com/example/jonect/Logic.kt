@@ -4,6 +4,8 @@
 
 package com.example.jonect
 
+import android.media.AudioFormat
+import android.media.AudioTrack
 import android.os.Handler
 import android.os.Looper
 import android.os.Message
@@ -27,47 +29,35 @@ class DisconnectEvent
 
 
 /**
- * Event from Connection to Logic. Server is now connected.
+ * Event from Connection to Logic. Rust logic is now connected.
  */
-class ConnectedEvent: ILogicStatusEvent {
+class RustLogicConnectedEvent: ILogicStatusEvent {
     override fun toString(): String {
-        return "Connected"
+        return "RustLogicConnectedEvent"
     }
 }
 
+
 /**
- * Event from Connection to Logic. Server is now disconnected.
+ * Event from Connection to Logic. Rust logic is now disconnected.
  */
-class DisconnectedEvent: ILogicStatusEvent {
-    override fun toString(): String {
-        return "Disconnected"
-    }
-}
+class RustLogicDisconnectedEvent
 
 /**
  * Event from Connection to Logic. There was some connection error.
  */
-class ConnectionError: ILogicStatusEvent {
+class RustLogicConnectionError: ILogicStatusEvent {
     override fun toString(): String {
-        return "Connection error"
+        return "Rust logic connection error. Restart the app."
     }
 }
 
 /**
- * Event from Connection to Logic. Server sent JSON message.
+ * Event from Connection to Logic. Rust logic sent UI JSON message.
  */
 class ConnectionMessage(val message: ProtocolMessage) {
     override fun toString(): String {
         return "Connection message: $message"
-    }
-}
-
-/**
- * Event from AudioPlayer to Logic. There was some audio stream error.
- */
-class AudioStreamError(private val message: String): ILogicStatusEvent {
-    override fun toString(): String {
-        return "AudioStreamError: $message"
     }
 }
 
@@ -82,6 +72,7 @@ interface ILogicStatusEvent
 class LogicThread(private val serviceHandle: ServiceHandle) : Thread() {
     private lateinit var messageHandler: Handler
     private lateinit var logic: Logic
+    private var disableMessageSending: Boolean = false
 
     /**
      * This code runs in a new thread.
@@ -104,9 +95,17 @@ class LogicThread(private val serviceHandle: ServiceHandle) : Thread() {
      * Send some type to the Logic.
      */
     private fun sendMessage(messageData: Any) {
+        if (this.disableMessageSending && messageData !is QuitRequestEvent ) {
+            return
+        }
+
         val message = this.messageHandler.obtainMessage()
         message.obj = messageData
         this.messageHandler.sendMessage(message)
+    }
+
+    fun disableNonQuitMessageSending() {
+        this.disableMessageSending = true
     }
 
     /**
@@ -150,14 +149,14 @@ class LogicMessageHandle(private val messageHandler: Handler) {
      * Send ConnectedEvent to LogicThread.
      */
     fun sendConnectedNotification() {
-        this.sendMessage(ConnectedEvent())
+        this.sendMessage(RustLogicConnectedEvent())
     }
 
     /**
      * Send ConnectionError to LogicThread.
      */
     fun sendConnectionError() {
-        this.sendMessage(ConnectionError())
+        this.sendMessage(RustLogicConnectionError())
     }
 
     /**
@@ -165,15 +164,6 @@ class LogicMessageHandle(private val messageHandler: Handler) {
      */
     fun sendConnectionMessage(message: ProtocolMessage) {
         this.sendMessage(ConnectionMessage(message))
-    }
-
-    /**
-     * Send AudioStreamError to LogicThread.
-     *
-     * @param error Error message.
-     */
-    fun sendAudioStreamError(error: String) {
-        this.sendMessage(AudioStreamError(error))
     }
 }
 
@@ -184,11 +174,10 @@ class LogicMessageHandle(private val messageHandler: Handler) {
  */
 class Logic(private val serviceHandle: ServiceHandle) {
     private lateinit var logicMessageHandle: LogicMessageHandle
+    private lateinit var connection: ConnectionThread
 
-
-    private var connection: ConnectionThread? = null
-    private var audio: AudioThread? = null
     private var connectionAddress: String? = null
+
 
     /**
      * Init handle for sending messages to the logic thread. Call this after creating
@@ -196,6 +185,9 @@ class Logic(private val serviceHandle: ServiceHandle) {
      */
     fun initLogicMessageHandle(handle: LogicMessageHandle) {
         this.logicMessageHandle = handle
+
+        this.connection = ConnectionThread(logicMessageHandle)
+        this.connection.start()
     }
 
     /**
@@ -209,61 +201,29 @@ class Logic(private val serviceHandle: ServiceHandle) {
             return false
         }
 
+        println(m)
+
         when (val event = m.obj) {
             is ConnectEvent -> {
                 println(event.address)
 
-                val connection = ConnectionThread(logicMessageHandle, event.address)
-                connection.start()
-
-                this.connection = connection
                 this.connectionAddress = event.address
+                this.connection.sendProtocolMessage(ConnectTo(event.address))
             }
             is DisconnectEvent -> {
-                this.audio?.also {
-                    it.runQuit()
-                    this.audio = null
-                }
-                this.connection?.also {
-                    it.runQuit()
-                    this.connection = null
-                    this.updateServiceStatus(DisconnectedEvent())
-                }
+                this.connection.sendProtocolMessage(DisconnectDevice)
             }
-            is ConnectedEvent -> {
-                this.updateServiceStatus(event)
-                this.connection?.sendProtocolMessage(ClientInfo("0.1", "Test client", AudioPlayer.getNativeSampleRate()))
+            is RustLogicConnectedEvent -> {
+                println("Rust logic connected.")
             }
-            is ConnectionError -> {
-                this.audio?.also {
-                    it.runQuit()
-                    this.audio = null
-                }
-                this.connection?.also {
-                    it.runQuit()
-                    this.connection = null
-                    this.updateServiceStatus(ConnectionError())
-                }
-            }
-            is AudioStreamError -> {
-                println(event.toString())
-                this.updateServiceStatus(event)
-                this.audio?.also {
-                    it.runQuit()
-                    this.audio = null
-                }
+            is RustLogicConnectionError -> {
+                this.updateServiceStatus(RustLogicConnectionError())
             }
             is ConnectionMessage -> {
                 this.handleProtocolMessage(event.message)
             }
             is QuitRequestEvent -> {
-                this.audio?.run {
-                    runQuit()
-                }
-
-                this.connection?.run {
-                    runQuit()
-                }
+                this.connection.runQuit()
 
                 // Quit message loop.
                 Looper.myLooper()!!.quit()
@@ -276,25 +236,23 @@ class Logic(private val serviceHandle: ServiceHandle) {
     }
 
     /**
-     * Handle JSON message from the server.
+     * Handle UI JSON message from the Rust logic.
      */
     private fun handleProtocolMessage(message: ProtocolMessage) {
         when (message) {
-            is ServerInfo -> {
-                println("Connected to $message")
+            is AndroidGetNativeSampleRate -> {
+                println("AndroidGetNativeSampleRate received")
+                val sampleRate = AudioTrack.getNativeOutputSampleRate(AudioFormat.ENCODING_PCM_16BIT)
+                this.connection.sendProtocolMessage(AndroidNativeSampleRate(sampleRate))
             }
-            is Ping -> {
-                println("Ping received")
-                this.connection?.sendProtocolMessage(PingResponse)
+            is DeviceConnectionEstablished -> {
+                this.updateServiceStatus(message)
             }
-            is PlayAudioStream -> {
-
-                println("Audio stream play request received. Message: $message")
-                if (this.audio == null) {
-                    val info = AudioStreamInfo(this.connectionAddress!!, message)
-                    this.audio = AudioThread(this.logicMessageHandle, info)
-                    this.audio!!.start()
-                }
+            is DeviceConnectionDisconnected -> {
+                this.updateServiceStatus(message)
+            }
+            is DeviceConnectionDisconnectedWithError -> {
+                this.updateServiceStatus(message)
             }
             else -> {
                 println("Unsupported message $message received.")

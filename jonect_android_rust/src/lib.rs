@@ -1,73 +1,80 @@
-//! Opus decoder for Jonect Android client. This code is not thread safe.
-//! Use this code only from one thread.
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
-use std::{thread::{self, JoinHandle}, sync::atomic::AtomicBool, panic};
+//! Start Jonect's main logic
 
+use std::{thread::{self, JoinHandle}, sync::{atomic::AtomicBool, Mutex}, panic};
+
+use android_log::{LogLevel, AndroidLogger};
 use jni::{JNIEnv, objects::{JClass, JString}, sys::jint};
 
-use stream_decoder::{StreamDecoder};
+use lazy_static::lazy_static;
 
-pub mod stream_decoder;
+use libjonect::{Logic, config::LogicConfig, utils::QuitSender};
 
-static QUIT_NOTIFICATION: AtomicBool = AtomicBool::new(false);
+pub mod android_log;
 
-static mut DECODING_THREAD_HANDLE: Option<JoinHandle<()>> = None;
+lazy_static! {
+    static ref LOGIC_THREAD_HANDLE: Mutex<Option<(JoinHandle<()>, QuitSender)>> = Mutex::new(None);
+}
+
+static LOGGING_INIT: AtomicBool = AtomicBool::new(true);
 
 
-/// Start Opus decoding thread. Warning: this code is not thread safe.
+/// Start logic.
 ///
 /// # Parameters
 /// * `env` - JNI requires this parameter.
 /// * `class` - JNI requires this parameter.
-/// * `address` - Jonect server IP address.
-/// * `port` - Jonect server TCP port number for audio data.
 #[no_mangle]
-pub extern "system" fn Java_com_example_jonect_OpusDecoder_startDecodingThread(
+pub extern "system" fn Java_com_example_jonect_RustLogic_startLogicThread(
     env: JNIEnv,
     class: JClass,
-    address: JString,
-    port: jint,
 ) {
-    let thread_handle = unsafe {
-        &mut DECODING_THREAD_HANDLE
-    };
+    if LOGGING_INIT.swap(false, std::sync::atomic::Ordering::SeqCst) {
+        panic::set_hook(Box::new(|info| {
+            android_log::android_println(&info.to_string(), LogLevel::Panic);
+        }));
 
-    if thread_handle.is_some() {
-        let message = "Decoder thread is already running.";
-        stream_decoder::android_println(message);
-        panic!("{}", message);
+        log::set_logger(&AndroidLogger).unwrap();
+        log::set_max_level(log::LevelFilter::Trace);
     }
 
-    let address = env.get_string(address).unwrap().to_string_lossy().to_string();
-    let port = port.try_into().unwrap();
-    let handle = thread::spawn(move || {
-        StreamDecoder::new(address, port).start();
+    let mut handle = LOGIC_THREAD_HANDLE.lock().unwrap();
+
+    if handle.is_some() {
+        panic!("{}", "Logic thread is already running.");
+    }
+
+    let (sender, receiver) = Logic::create_quit_notification_channel();
+
+    let thread_handle = thread::spawn(move || {
+        Logic::run(LogicConfig {
+            pa_source_name: None,
+            encode_opus: false,
+            connect_address: None,
+            enable_connection_listening: false,
+            enable_ping: false,
+        }, Some(receiver));
     });
 
-    *thread_handle = Some(handle);
+    *handle = Some((thread_handle, sender));
 
 }
 
-/// Quit Opus decoding thread. Warning: this code is not thread safe.
+/// Quit logic thread.
 ///
 /// # Parameters
 /// * `env` - JNI requires this parameter.
 /// * `class` - JNI requires this parameter.
 #[no_mangle]
-pub extern "system" fn Java_com_example_jonect_OpusDecoder_quit(
+pub extern "system" fn Java_com_example_jonect_RustLogic_quitLogicThread(
     env: JNIEnv,
     class: JClass,
 ) {
-    let thread_handle = unsafe {
-        DECODING_THREAD_HANDLE.take().unwrap()
-    };
-
-    QUIT_NOTIFICATION.store(true, std::sync::atomic::Ordering::Relaxed);
-    match thread_handle.join() {
-        Ok(()) => (),
-        Err(_) => {
-            stream_decoder::android_println("Decoder thread panicked.");
-        }
+    if let Some((thread_handle, quit_sender)) = LOGIC_THREAD_HANDLE.lock().unwrap().take() {
+        quit_sender.send(()).unwrap();
+        thread_handle.join().unwrap();
     }
-    QUIT_NOTIFICATION.store(false, std::sync::atomic::Ordering::Relaxed);
 }

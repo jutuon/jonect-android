@@ -55,9 +55,11 @@ apply plugin: 'org.mozilla.rust-android-gradle.rust-android'
 cargo {
     module  = "../jonect_android_rust"
     libname = "jonect_android_rust"
-    targets = ["arm", "arm64", "x86", "x86_64"]
+    //targets = ["arm", "arm64", "x86", "x86_64"]
+    targets = ["x86"]
     apiLevel = 21
-    profile = "release"
+    //profile = "release"
+    profile = "debug"
 }
 
 tasks.whenTaskAdded { task ->

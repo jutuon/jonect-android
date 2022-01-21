@@ -23,13 +23,11 @@ import java.util.concurrent.BlockingQueue
 /**
  * Handle to ConnectionThread. Use start method to start the thread.
  *
- * This thread will do JSON messaging to the server.
+ * This thread will do JSON UI messaging to the Rust logic code.
  *
- *  @param address Jonect server IP address.
  */
 class ConnectionThread(
     private val handle: LogicMessageHandle,
-    private val address: String,
 ) : Thread() {
     private val connectionMessages: BlockingQueue<ProtocolMessage> =
         ArrayBlockingQueue(32)
@@ -56,7 +54,6 @@ class ConnectionThread(
     override fun run() {
         val connection = Connection(
             this.handle,
-            this.address,
             this.connectionMessages,
             this.messageNotificationPipe.source(),
             this.requestQuitPipe.source(),
@@ -96,7 +93,7 @@ class ConnectionThread(
 private class DisableWriting
 
 /**
- * Component for reading and writing Jonect JSON messages from TCP socket.
+ * Component for reading and writing Jonect UI JSON messages from TCP socket.
  *
  * Logic component will send messages to this component using two "channels". The first channel
  * is implemented with BlockingQueue and Pipe (Java's select system does not support
@@ -105,7 +102,6 @@ private class DisableWriting
  */
 class Connection(
         private val handle: LogicMessageHandle,
-        private val address: String,
         private val messages: BlockingQueue<ProtocolMessage>,
         private val messageNotifications: Pipe.SourceChannel,
         private val quitRequested: Pipe.SourceChannel,
@@ -121,16 +117,36 @@ class Connection(
     fun start() {
         println("Connection: start")
 
-        // Connect to server JSON data port.
+        val rustLogic = RustLogic()
+        rustLogic.startLogicThread()
 
-        val inetAddress = InetSocketAddress(this.address, 8080)
-        val socket: SocketChannel = try {
-            SocketChannel.open(inetAddress)
-        } catch (e: ConnectException) {
-            // Send error and wait quit.
-            this.handle.sendConnectionError()
-            this.waitQuitRequest()
-            return
+        // Connect to Rust logic's UI JSON TCP port.
+
+        val inetAddress = InetSocketAddress("127.0.0.1", 8081)
+        var socket: SocketChannel
+
+        var reconnectCount = 0
+
+        while (true) {
+            try {
+                socket = SocketChannel.open(inetAddress)
+                break
+            } catch (e: ConnectException) {
+                println(e)
+                reconnectCount++
+
+                if (reconnectCount >= 100) {
+                    // Send error and wait quit.
+                    this.handle.sendConnectionError()
+                    rustLogic.quitLogicThread()
+                    this.waitQuitRequest()
+                    this.messageNotifications.close()
+                    this.quitRequested.close()
+                    return
+                } else {
+                    Thread.sleep(10)
+                }
+            }
         }
 
         this.handle.sendConnectedNotification()
@@ -164,6 +180,7 @@ class Connection(
                         }
                     } catch (e: ConnectionQuitException) {
                         this.handle.sendConnectionError()
+                        this.waitQuitRequest()
                         break
                     }
                 }
@@ -187,7 +204,7 @@ class Connection(
 
             if (selector.selectedKeys().remove(messageNotificationKey)) {
                 /*
-                Logic sent new message for processing. This code runs only when there is no
+                Kotlin Logic sent new message for processing. This code runs only when there is no
                 message writing happening currently.
                 */
 
@@ -214,6 +231,8 @@ class Connection(
 
         this.messageNotifications.close()
         this.quitRequested.close()
+
+        RustLogic().quitLogicThread()
 
         println("Connection: quit")
     }
@@ -253,7 +272,7 @@ class Connection(
     }
 
     /**
-     * Read message from Logic. This message will be sent to the server.
+     * Read message from Logic. This message will be sent to the Rust logic code.
      * Returns null if there was no message available.
      */
     private fun tryReadMessage(): String? {
@@ -401,4 +420,13 @@ private class SocketWriter {
             }
         }
     }
+}
+
+private class RustLogic {
+    init {
+        System.loadLibrary("jonect_android_rust")
+    }
+
+    external fun startLogicThread()
+    external fun quitLogicThread()
 }

@@ -10,6 +10,7 @@ import android.os.Binder
 import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
+import java.lang.Exception
 
 
 /**
@@ -117,26 +118,31 @@ class LogicService: Service() {
      */
     fun setStatus(statusEvent: ILogicStatusEvent) {
         when (statusEvent) {
-            is ConnectedEvent -> {
+            is DeviceConnectionEstablished -> {
                 this.serverConnected = true
                 this.serverConnectDisconnectRunning = false
                 this.currentConnectedActivity?.also {
                     it.serviceServerConnectedUpdate(this.serverConnected)
                 }
             }
-            is ConnectionError -> {
+            is DeviceConnectionDisconnectedWithError -> {
                 this.serverConnected = false
                 this.serverConnectDisconnectRunning = false
                 this.currentConnectedActivity?.also {
                     it.serviceServerConnectedUpdate(this.serverConnected)
                 }
             }
-            is DisconnectedEvent -> {
+            is DeviceConnectionDisconnected -> {
                 this.serverConnected = false
                 this.serverConnectDisconnectRunning = false
                 this.currentConnectedActivity?.also {
                     it.serviceServerConnectedUpdate(this.serverConnected)
                 }
+            }
+            is RustLogicConnectionError -> {
+                this.serverConnected = false
+                this.serverConnectDisconnectRunning = true
+                this.logicThread.disableNonQuitMessageSending()
             }
         }
 

@@ -1,20 +1,11 @@
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
+
 use std::{net::{TcpListener, ToSocketAddrs, TcpStream}, io::{Read, Write}, ffi::{CString}};
 
 use audiopus::coder::Decoder;
 
-/// Print to Android Studio's log.
-pub fn android_println(text: &str) {
-    let tag = CString::new("jonect_rust").unwrap();
-    let text = CString::new(text).unwrap();
-
-    unsafe {
-        ndk_sys::__android_log_write(
-            ndk_sys::android_LogPriority_ANDROID_LOG_INFO.try_into().unwrap(),
-            tag.as_ptr(),
-            text.as_ptr(),
-        );
-    }
-}
 
 
 /// Decode Jonect Opus stream and send resulting PCM data to Kotlin
@@ -115,11 +106,12 @@ impl StreamDecoder {
                 }
             }
 
+            // TODO: following code is commented
             // Check quit notification.
-            if super::QUIT_NOTIFICATION.load(std::sync::atomic::Ordering::Relaxed) {
-                android_println("Quit detected.");
-                return;
-            }
+            // if super::QUIT_NOTIFICATION.load(std::sync::atomic::Ordering::Relaxed) {
+            //     android_println("Quit detected.");
+            //     return;
+            // }
         }
 
     }
