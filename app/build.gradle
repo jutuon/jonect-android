@@ -10,7 +10,8 @@ android {
 
     externalNativeBuild {
         cmake {
-            version = "3.18.1"
+            version = '3.18.1'
+            path file('src/main/cpp/CMakeLists.txt')
         }
     }
 
@@ -22,6 +23,11 @@ android {
         versionName "1.0"
 
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
+        externalNativeBuild {
+            cmake {
+                cppFlags '-fno-exceptions'
+            }
+        }
     }
 
     buildTypes {
@@ -58,12 +64,21 @@ cargo {
     //targets = ["arm", "arm64", "x86", "x86_64"]
     targets = ["x86"]
     apiLevel = 21
-    //profile = "release"
+    // Rust release build requires that externalNativeBuildRelease runs before it.
+    // profile = "release"
     profile = "debug"
+    targetIncludes = ['libjonect_android_rust.so', 'libjonect_android_cpp.so']
 }
+
+// TODO: Mixing Cargo and Android release and debug builds does not work currently as wrong files
+//       are copied or updated.
 
 tasks.whenTaskAdded { task ->
     if ((task.name == 'javaPreCompileDebug' || task.name == 'javaPreCompileRelease')) {
         task.dependsOn 'cargoBuild'
+    }
+
+    if ((task.name == 'cargoBuild' )) {
+        task.mustRunAfter 'externalNativeBuildDebug', 'externalNativeBuildRelease'
     }
 }

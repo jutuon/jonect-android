@@ -1,3 +1,7 @@
 [submodule "jonect_android_rust/libjonect"]
 	path = jonect_android_rust/libjonect
 	url = https://github.com/jutuon/libjonect
+[submodule "app/src/main/cpp/oboe"]
+	path = app/src/main/cpp/oboe
+	url = https://github.com/google/oboe
+	branch = 1.6-stable
