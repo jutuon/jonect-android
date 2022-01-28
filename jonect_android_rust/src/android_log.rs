@@ -59,7 +59,12 @@ impl log::Log for AndroidLogger {
 
     fn log(&self, record: &log::Record) {
         if self.enabled(record.metadata()) {
-            let message = format!("{}", record.args());
+            let message = format!(
+                "{} Location: {}:{}",
+                record.args(),
+                record.module_path().unwrap_or_default(),
+                record.line().unwrap_or_default(),
+            );
             android_println(&message, LogLevel::Level(record.level()))
         }
     }

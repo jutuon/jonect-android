@@ -12,6 +12,8 @@ add_library( jonect_android_cpp # Set library target name.
              # Code files.
              jonect.cpp)
 
+target_compile_options(jonect_android_cpp PRIVATE -Wall -Wextra -Ofast)
+
 # Build Oboe and import it's headers.
 add_subdirectory (./oboe)
 include_directories (./oboe/include)

@@ -11,6 +11,17 @@ import android.os.Looper
 import android.os.Message
 
 /**
+ * Event from Logic to LogicService.
+ *
+ * @param message_to Field for AndroidNativeSampleRate protocol message.
+ */
+data class AudioInfo(
+    var native_sample_rate: Int,
+    var frames_per_burst: Int,
+    val message_to: String,
+)
+
+/**
  * Event from LogicService to Logic. Start connecting to the server.
  *
  * @param address Server IP address.
@@ -130,6 +141,13 @@ class LogicThread(private val serviceHandle: ServiceHandle) : Thread() {
     fun sendDisconnectMessage() {
         this.sendMessage(DisconnectEvent())
     }
+
+    /**
+     * Send AudioInfo to the Logic.
+     */
+    fun sendAudioInfo(audioInfo: AudioInfo) {
+        this.sendMessage(audioInfo)
+    }
 }
 
 /**
@@ -222,6 +240,10 @@ class Logic(private val serviceHandle: ServiceHandle) {
             is ConnectionMessage -> {
                 this.handleProtocolMessage(event.message)
             }
+            is AudioInfo -> {
+                val m = AndroidNativeSampleRate(event.native_sample_rate, event.frames_per_burst, event.message_to)
+                this.connection.sendProtocolMessage(m)
+            }
             is QuitRequestEvent -> {
                 this.connection.runQuit()
 
@@ -242,8 +264,8 @@ class Logic(private val serviceHandle: ServiceHandle) {
         when (message) {
             is AndroidGetNativeSampleRate -> {
                 println("AndroidGetNativeSampleRate received")
-                val sampleRate = AudioTrack.getNativeOutputSampleRate(AudioFormat.ENCODING_PCM_16BIT)
-                this.connection.sendProtocolMessage(AndroidNativeSampleRate(sampleRate))
+
+                this.serviceHandle.requestAudioInfo(AudioInfo(0, 0, message.message_from))
             }
             is DeviceConnectionEstablished -> {
                 this.updateServiceStatus(message)

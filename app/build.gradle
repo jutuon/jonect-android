@@ -65,17 +65,21 @@ cargo {
     targets = ["x86"]
     apiLevel = 21
     // Rust release build requires that externalNativeBuildRelease runs before it.
-    // profile = "release"
-    profile = "debug"
+    profile = "release"
+    //profile = "debug"
     targetIncludes = ['libjonect_android_rust.so', 'libjonect_android_cpp.so']
 }
 
-// TODO: Mixing Cargo and Android release and debug builds does not work currently as wrong files
-//       are copied or updated.
+// Note that mixing Cargo and CMake release and debug builds does not work as Rust build script
+// uses current Cargo profile ("release" or "debug") in file path which points to the
+// libjonect_android_cpp.so.
 
 tasks.whenTaskAdded { task ->
     if ((task.name == 'javaPreCompileDebug' || task.name == 'javaPreCompileRelease')) {
         task.dependsOn 'cargoBuild'
+
+        // The following line is not needed when compiling Rust debug builds.
+        task.dependsOn 'externalNativeBuildRelease'
     }
 
     if ((task.name == 'cargoBuild' )) {

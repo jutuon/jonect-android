@@ -5,12 +5,15 @@
 package com.example.jonect
 
 import android.app.Service
+import android.content.Context
 import android.content.Intent
+import android.media.AudioManager
 import android.os.Binder
 import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
 import java.lang.Exception
+import java.lang.NumberFormatException
 
 
 /**
@@ -169,6 +172,44 @@ class LogicService: Service() {
             this.currentConnectedActivity = null
         }
     }
+
+    fun sendAudioInfoToLogic(audioInfo: AudioInfo) {
+        val audioManager = getSystemService(Context.AUDIO_SERVICE) as AudioManager
+        val sampleRateString = audioManager.getProperty(AudioManager.PROPERTY_OUTPUT_SAMPLE_RATE)
+
+        // TODO: Display errors in UI?
+
+        val sampleRate = if (sampleRateString != null) {
+            try {
+                Integer.parseInt(sampleRateString)
+            } catch (e: NumberFormatException) {
+                println("Error in sendAudioInfoToLogic when parsing sampleRateString: $e")
+                return
+            }
+        } else {
+            println("Error: AudioManager.PROPERTY_OUTPUT_SAMPLE_RATE is null.")
+            return
+        }
+
+        val framesPerBufferString = audioManager.getProperty(AudioManager.PROPERTY_OUTPUT_FRAMES_PER_BUFFER)
+
+        val framesPerBuffer = if (framesPerBufferString != null) {
+            try {
+                Integer.parseInt(framesPerBufferString)
+            } catch (e: NumberFormatException) {
+                println("Error in sendAudioInfoToLogic when parsing framesPerBufferString: $e")
+                return
+            }
+        } else {
+            println("Error: AudioManager.PROPERTY_OUTPUT_FRAMES_PER_BUFFER is null.")
+            return
+        }
+
+        audioInfo.native_sample_rate = sampleRate
+        audioInfo.frames_per_burst = framesPerBuffer
+
+        this.logicThread.sendAudioInfo(audioInfo)
+    }
 }
 
 /**
@@ -182,6 +223,12 @@ class ServiceHandle(private val service: LogicService) {
     fun updateStatus(statusEvent: ILogicStatusEvent) {
         Handler(Looper.getMainLooper()).post {
             this.service.setStatus(statusEvent)
+        }
+    }
+
+    fun requestAudioInfo(audioInfo: AudioInfo) {
+        Handler(Looper.getMainLooper()).post {
+            this.service.sendAudioInfoToLogic(audioInfo)
         }
     }
 }

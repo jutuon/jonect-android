@@ -15,12 +15,16 @@ sealed class ProtocolMessage
 
 @Serializable
 @SerialName("AndroidGetNativeSampleRate")
-object AndroidGetNativeSampleRate: ProtocolMessage()
+data class AndroidGetNativeSampleRate(
+        val message_from: String,
+): ProtocolMessage()
 
 @Serializable
 @SerialName("AndroidNativeSampleRate")
 data class AndroidNativeSampleRate(
         val native_sample_rate: Int,
+        val frames_per_burst: Int,
+        val message_to: String,
 ): ProtocolMessage()
 
 @Serializable

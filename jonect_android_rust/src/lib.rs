@@ -41,10 +41,6 @@ pub extern "system" fn Java_com_example_jonect_RustLogic_startLogicThread(
         log::set_max_level(log::LevelFilter::Trace);
     }
 
-    unsafe {
-        hello_cpp();
-    }
-
     let mut handle = LOGIC_THREAD_HANDLE.lock().unwrap();
 
     if handle.is_some() {
@@ -81,10 +77,4 @@ pub extern "system" fn Java_com_example_jonect_RustLogic_quitLogicThread(
         quit_sender.send(()).unwrap();
         thread_handle.join().unwrap();
     }
-}
-
-
-#[link(name = "jonect_android_cpp", kind = "dylib")]
-extern "C" {
-    fn hello_cpp();
 }
