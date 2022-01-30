@@ -571,7 +571,7 @@ dependencies = [
  "audiopus",
  "bytes",
  "gtk",
- "lazy_static",
+ "libc",
  "libpulse-binding",
  "libpulse-glib-binding",
  "log",
