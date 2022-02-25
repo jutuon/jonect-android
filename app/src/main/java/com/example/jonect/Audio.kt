@@ -118,6 +118,7 @@ class AudioPlayer(
     private var audioTrackPlaying = false
     private var underrunCount = 0
     private var initialBufferingCounter = 0
+    private var initialBufferingCounterLimit = 0
 
     private var opusDecoder: OpusDecoder? = null
 
@@ -189,13 +190,17 @@ class AudioPlayer(
             }
         }
 
-        val minBufferSize = AudioTrack.getMinBufferSize(
+        var minBufferSize = AudioTrack.getMinBufferSize(
             this.streamInfo.message.rate,
             this.streamInfo.message.channels.toInt(),
             AudioFormat.ENCODING_PCM_16BIT,
         )
 
-        println("AudioTrack min buffer size is $minBufferSize")
+        println("AudioTrack min buffer size in bytes is $minBufferSize")
+
+        minBufferSize *= 2
+
+        println("AudioTrack requested buffer size in bytes is $minBufferSize")
 
         val nativeSampleRate = AudioPlayer.getNativeSampleRate()
 
@@ -223,6 +228,13 @@ class AudioPlayer(
             )
         }
 
+        val realBufferSizeInBytes = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            println("AudioTrack buffer size in frames is ${audioTrack.bufferSizeInFrames}")
+            audioTrack.bufferSizeInFrames*2*2
+        } else {
+            minBufferSize
+        }
+
         // Create the socket for reading PCM data.
 
         var address = this.streamInfo.address
@@ -248,6 +260,16 @@ class AudioPlayer(
         // Use buffer which matches current framesize: buffer size % (bytes per sample * channels) == 0
         val socketBufferSize = 32
         val currentAudioBuffer = ByteBuffer.allocate(socketBufferSize)
+
+        val maxBufferingSizeInBytes = realBufferSizeInBytes - (realBufferSizeInBytes % socketBufferSize)
+
+        if ((maxBufferingSizeInBytes) % socketBufferSize == 0) {
+            this.initialBufferingCounterLimit = (maxBufferingSizeInBytes)/socketBufferSize - 1;
+            println("this.initialBufferingCounterLimit = ${this.initialBufferingCounterLimit}")
+            println("Buffering ${this.initialBufferingCounterLimit*socketBufferSize} bytes before playing audio.")
+        } else {
+            throw Exception("Unexpected buffer size")
+        }
 
         // Configure Java's select system.
 
@@ -303,6 +325,10 @@ class AudioPlayer(
             }
         }
 
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+            println("AudioPlayer: underrun count: ${audioTrack.underrunCount}")
+        }
+
         // Close AudioPlayer.
 
         audioTrack.pause()
@@ -353,7 +379,7 @@ class AudioPlayer(
 
         // Do some buffering before playing so there should be less buffer underruns
         // when audio starts playing.
-        if (this.initialBufferingCounter < 4) {
+        if (this.initialBufferingCounter < this.initialBufferingCounterLimit) {
             this.initialBufferingCounter += 1
             return null
         }
