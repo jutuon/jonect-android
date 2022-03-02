@@ -62,8 +62,8 @@ cargo {
     module  = "../jonect_android_rust"
     libname = "jonect_android_rust"
     //targets = ["arm", "arm64", "x86", "x86_64"]
-    //targets = ["x86", "arm64"]
-    targets = ["x86"]
+    targets = ["x86", "arm64"]
+    //targets = ["x86"]
     apiLevel = 21
     // Rust release build requires that externalNativeBuildRelease runs before it.
     profile = "release"
