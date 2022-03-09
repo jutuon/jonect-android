@@ -56,6 +56,8 @@ pub extern "system" fn Java_com_example_jonect_RustLogic_startLogicThread(
             connect_address: None,
             enable_connection_listening: false,
             enable_ping: false,
+            enable_udp_audio_data_sending: false,
+            print_first_audio_packet_bytes: false,
         }, Some(receiver));
     });
 
