@@ -8,6 +8,7 @@ import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.content.ServiceConnection
+import android.hardware.usb.UsbManager
 import androidx.appcompat.app.AppCompatActivity
 import android.os.Bundle
 import android.os.IBinder
@@ -80,6 +81,8 @@ class MainActivity : AppCompatActivity() {
 
     private val serviceConnectionHandler = ServiceConnectionHandler(this)
 
+    private var connectUsbAccessory = false
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
@@ -138,6 +141,10 @@ class MainActivity : AppCompatActivity() {
         if (!status) {
             throw Exception("Activity: bindService() failed")
         }
+
+        if (this.intent.action == UsbManager.ACTION_USB_ACCESSORY_ATTACHED) {
+            this.connectUsbAccessory = true
+        }
     }
 
     /**
@@ -154,6 +161,10 @@ class MainActivity : AppCompatActivity() {
                 // Connect to server automatically.
                 this.handleConnectButtonOnClick()
                 this.connectAutomatically = false
+            }
+
+            if (this.connectUsbAccessory) {
+                it.connectUsbAccessory()
             }
         }
     }

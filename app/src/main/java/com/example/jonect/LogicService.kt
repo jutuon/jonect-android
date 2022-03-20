@@ -4,15 +4,14 @@
 
 package com.example.jonect
 
-import android.app.Service
+import android.app.*
+import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
+import android.content.IntentFilter
+import android.hardware.usb.UsbManager
 import android.media.AudioManager
-import android.os.Binder
-import android.os.Handler
-import android.os.IBinder
-import android.os.Looper
-import java.lang.Exception
+import android.os.*
 import java.lang.NumberFormatException
 
 
@@ -22,6 +21,12 @@ import java.lang.NumberFormatException
 class LogicServiceBinder(private var logicService: LogicService): Binder() {
     fun getService(): LogicService {
         return this.logicService
+    }
+}
+
+class UsbDisconnectedReceiver(private var service: LogicService): BroadcastReceiver() {
+    override fun onReceive(context: Context?, intent: Intent?) {
+        println("USB disconnected")
     }
 }
 
@@ -37,6 +42,15 @@ class LogicService: Service() {
     private var serverConnected = false
     private var serverConnectDisconnectRunning = false
 
+    private lateinit var usbLogic: UsbLogic
+    private lateinit var usbDisconnectedReceiver: BroadcastReceiver
+
+    companion object {
+        const val SERVICE_NOTIFICATION_ID = 1
+        const val SERVICE_NOTIFICATION_CHANNEL_ID = "Jonect"
+        const val SERVICE_NOTIFICATION_CHANNEL_NAME = "Jonect notifications"
+    }
+
     /**
      * Service's onCreate method. Check Android's documentation when this is called.
      */
@@ -50,6 +64,13 @@ class LogicService: Service() {
         this.serverConnectDisconnectRunning = false
 
         this.logicThread.start()
+
+        val usbManager = this.getSystemService(Context.USB_SERVICE) as UsbManager
+        this.usbLogic = UsbLogic(usbManager)
+
+        this.usbDisconnectedReceiver = UsbDisconnectedReceiver(this)
+        this.registerReceiver(this.usbDisconnectedReceiver, IntentFilter(UsbManager.ACTION_USB_ACCESSORY_DETACHED))
+
         println("Service: created")
     }
 
@@ -57,6 +78,30 @@ class LogicService: Service() {
      * Service's onStartCommand method. Check Android's documentation for more information about this method.
      */
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        val builder = Notification.Builder(this)
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            val channel = NotificationChannel(
+                SERVICE_NOTIFICATION_CHANNEL_ID,
+                SERVICE_NOTIFICATION_CHANNEL_NAME,
+                NotificationManager.IMPORTANCE_LOW)
+            channel.description = "Jonect notifications"
+
+            val notificationManager = this.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+            notificationManager.createNotificationChannel(channel)
+
+            builder.setChannelId(channel.id)
+        }
+
+        val notification = builder.setPriority(Notification.PRIORITY_LOW)
+            .setContentTitle("Jonect")
+            .setContentText("Jonect service")
+            .setSmallIcon(R.drawable.ic_launcher_foreground)
+            .setTicker("Jonect service started")
+            .build()
+
+        this.startForeground(SERVICE_NOTIFICATION_ID, notification)
+
         return START_NOT_STICKY
     }
 
@@ -71,6 +116,8 @@ class LogicService: Service() {
      * Service's onDestroy method. Check Android's documentation for more information about this method.
      */
     override fun onDestroy() {
+        this.unregisterReceiver(this.usbDisconnectedReceiver)
+
         this.logicThread.sendQuitRequest()
         this.logicThread.join()
         println("Service: quit ready")
@@ -114,6 +161,21 @@ class LogicService: Service() {
     fun sendDisconnectMessage() {
         this.logicThread.sendDisconnectMessage()
         this.serverConnectDisconnectRunning = true
+    }
+
+    fun connectUsbAccessory() {
+        println("connectUsbAccessory")
+        requestUsbAccessory()
+    }
+
+    fun requestUsbAccessory() {
+        val fd = this.usbLogic.connectAccessory()
+
+        if (fd != null) {
+            this.logicThread.sendUsbAccessoryFileDescriptor(fd)
+        } else {
+            this.logicThread.sendUsbAccessoryFileDescriptor(-1)
+        }
     }
 
     /**
@@ -229,6 +291,12 @@ class ServiceHandle(private val service: LogicService) {
     fun requestAudioInfo(audioInfo: AudioInfo) {
         Handler(Looper.getMainLooper()).post {
             this.service.sendAudioInfoToLogic(audioInfo)
+        }
+    }
+
+    fun requestUsbAccessory() {
+        Handler(Looper.getMainLooper()).post {
+            this.service.requestUsbAccessory()
         }
     }
 }

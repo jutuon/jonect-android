@@ -20,6 +20,16 @@ data class AndroidGetNativeSampleRate(
 ): ProtocolMessage()
 
 @Serializable
+@SerialName("AndroidGetUsbAccessoryFileDescriptor")
+object AndroidGetUsbAccessoryFileDescriptor: ProtocolMessage()
+
+@Serializable
+@SerialName("AndroidUsbAccessoryFileDescriptor")
+data class AndroidUsbAccessoryFileDescriptor(
+        val fd: String,
+): ProtocolMessage()
+
+@Serializable
 @SerialName("AndroidNativeSampleRate")
 data class AndroidNativeSampleRate(
         val native_sample_rate: Int,

@@ -38,6 +38,11 @@ class QuitRequestEvent
  */
 class DisconnectEvent
 
+/**
+ * Event from LogicService to Logic.
+ */
+class UsbAccessoryFileDescriptor(val fd: Int)
+
 
 /**
  * Event from Connection to Logic. Rust logic is now connected.
@@ -148,6 +153,10 @@ class LogicThread(private val serviceHandle: ServiceHandle) : Thread() {
     fun sendAudioInfo(audioInfo: AudioInfo) {
         this.sendMessage(audioInfo)
     }
+
+    fun sendUsbAccessoryFileDescriptor(fd: Int) {
+        this.sendMessage(UsbAccessoryFileDescriptor(fd))
+    }
 }
 
 /**
@@ -244,6 +253,10 @@ class Logic(private val serviceHandle: ServiceHandle) {
                 val m = AndroidNativeSampleRate(event.native_sample_rate, event.frames_per_burst, event.message_to)
                 this.connection.sendProtocolMessage(m)
             }
+            is UsbAccessoryFileDescriptor -> {
+                val m = AndroidUsbAccessoryFileDescriptor(event.fd.toString())
+                this.connection.sendProtocolMessage(m)
+            }
             is QuitRequestEvent -> {
                 this.connection.runQuit()
 
@@ -275,6 +288,9 @@ class Logic(private val serviceHandle: ServiceHandle) {
             }
             is DeviceConnectionDisconnectedWithError -> {
                 this.updateServiceStatus(message)
+            }
+            is AndroidGetUsbAccessoryFileDescriptor -> {
+                this.serviceHandle.requestUsbAccessory()
             }
             else -> {
                 println("Unsupported message $message received.")
